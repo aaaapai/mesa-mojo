@@ -72,9 +72,9 @@ jobs:
             -Degl-native-platform=android \
             -Dgbm=disabled \
             -Dopengl=true \
-            -Dvulkan-drivers= \
+            -Dvulkan-drivers=freedreno \
             -Dtools= \
-            -Dgallium-drivers=zink \
+            -Dgallium-drivers=zink,freedreno \
             -Dcpp_rtti=false \
             -Degl-lib-suffix=_mesa \
             -Dshared-glapi=disabled
