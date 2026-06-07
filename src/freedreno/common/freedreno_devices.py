@@ -40,7 +40,7 @@ add_gpus([
         tile_max_w   = 992, # max_bitfield_val(4, 0, 5)
         tile_max_h   = max_bitfield_val(9, 5, 5),
         num_vsc_pipes = 8,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         num_sp_cores = 0, # TODO
         wave_granularity = 2,
         fibers_per_sp = 0, # TODO
@@ -58,7 +58,7 @@ add_gpus([
         tile_max_w   = 1024, # max_bitfield_val(4, 0, 5)
         tile_max_h   = max_bitfield_val(9, 5, 5),
         num_vsc_pipes = 8,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         num_sp_cores = 0, # TODO
         wave_granularity = 2,
         fibers_per_sp = 0, # TODO
@@ -77,7 +77,7 @@ add_gpus([
         tile_max_w   = 1024, # max_bitfield_val(7, 0, 5)
         tile_max_h   = max_bitfield_val(16, 9, 5),
         num_vsc_pipes = 16,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         num_sp_cores = 1,
         wave_granularity = 2,
         fibers_per_sp = 64 * 16, # Lowest number that didn't fault on spillall fs-varying-array-mat4-col-row-rd.
@@ -95,7 +95,7 @@ add_gpus([
         tile_max_w   = 1024, # max_bitfield_val(7, 0, 5)
         tile_max_h   = max_bitfield_val(16, 9, 5),
         num_vsc_pipes = 16,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         num_sp_cores = 2,
         wave_granularity = 2,
         fibers_per_sp = 64 * 16, # Lowest number that didn't fault on spillall fs-varying-array-mat4-col-row-rd.
@@ -113,7 +113,7 @@ add_gpus([
         tile_max_w   = 1024, # max_bitfield_val(7, 0, 5)
         tile_max_h   = max_bitfield_val(16, 9, 5),
         num_vsc_pipes = 16,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         num_sp_cores = 4,
         wave_granularity = 2,
         fibers_per_sp = 64 * 16, # Lowest number that didn't fault on spillall fs-varying-array-mat4-col-row-rd.
@@ -217,6 +217,7 @@ a6xx_gen3 = GPUProps(
         # HW seem to support this, but prop driver doesn't enable it,
         # Be safe and don't enable it either.
         # supports_linear_mipmap_threshold_in_blocks = True,
+        round_robin_errata = True,
     )
 
 a6xx_gen4 = GPUProps(
@@ -258,6 +259,7 @@ a6xx_gen4 = GPUProps(
         # HW seem to support this, but prop driver doesn't enable it,
         # Be safe and don't enable it either.
         # supports_linear_mipmap_threshold_in_blocks = True,
+        round_robin_errata = True,
     )
 
 add_gpus([
@@ -313,7 +315,7 @@ add_gpus([
         tile_max_w = 1024,
         tile_max_h = 1024,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 16,
         highest_bank_bit = 14,
@@ -348,7 +350,7 @@ add_gpus([
         tile_max_w = 1024,
         tile_max_h = 1024,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 16,
         magic_regs = dict(
@@ -382,7 +384,7 @@ add_gpus([
         tile_max_w = 1024,
         tile_max_h = 1024,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
         magic_regs = dict(
@@ -416,7 +418,7 @@ add_gpus([
         tile_max_w = 1024,
         tile_max_h = 1024,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 16,
         highest_bank_bit = 15,
@@ -451,7 +453,7 @@ add_gpus([
         tile_max_w = 1024,
         tile_max_h = 1024,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 4 * 16,
         highest_bank_bit = 15,
@@ -486,7 +488,7 @@ add_gpus([
         tile_max_w = 1024,
         tile_max_h = 1024,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 4 * 16,
         highest_bank_bit = 15,
@@ -521,7 +523,7 @@ add_gpus([
         tile_max_w = 1024,
         tile_max_h = 1024,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
         highest_bank_bit = 16,
@@ -562,7 +564,7 @@ add_gpus([
         tile_max_w = 1024,
         tile_max_h = 1024,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
         highest_bank_bit = 14,
@@ -596,7 +598,7 @@ add_gpus([
         tile_max_w = 1024,
         tile_max_h = 1024,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
         highest_bank_bit = 16,
@@ -631,7 +633,7 @@ add_gpus([
         tile_max_w = 1024,
         tile_max_h = 1024,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 4 * 16,
         magic_regs = dict(
@@ -665,7 +667,7 @@ add_gpus([
         tile_max_w = 1024,
         tile_max_h = 1024,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
         highest_bank_bit = 16,
@@ -693,6 +695,7 @@ add_gpus([
         GPUId(702), # KGSL
         GPUId(chip_id=0x00b207002000, name="FD702"), # QRB2210 RB1
         GPUId(chip_id=0xffff07002000, name="FD702"), # Default no-speedbin fallback
+        GPUId(chip_id=0xffff07000400, name="Adreno (TM) 704"),
     ], A6xxGPUInfo(
         CHIP.A6XX, # NOT a mistake!
         [a6xx_base, a6xx_gen1_low, GPUProps(
@@ -795,6 +798,8 @@ a7xx_base = GPUProps(
         has_pred_bit = True,
         has_pc_dgen_so_cntl = True,
         has_eolm_eogm = True,
+
+        round_robin_errata = True,
     )
 
 a7xx_gen1 = GPUProps(
@@ -821,6 +826,7 @@ a7xx_gen2 = GPUProps(
         has_hw_bin_scaling = True,
         has_image_processing = True,
         has_64b_image_atomics = True,
+        has_implicit_fragface_fragcoord_ij_linear = True,
     )
 
 a7xx_gen3 = GPUProps(
@@ -851,6 +857,7 @@ a7xx_gen3 = GPUProps(
         has_image_processing = True,
         max_draw_states = 64,
         has_64b_image_atomics = True,
+        has_implicit_fragface_fragcoord_ij_linear = True,
     )
 
 a730_magic_regs = dict(
@@ -921,9 +928,7 @@ a740_raw_magic_regs = [
         [A6XXRegs.REG_A7XX_UCHE_UNKNOWN_0E11, 0x00000000],
         [A6XXRegs.REG_A7XX_SP_HLSQ_DBG_ECO_CNTL, 0x00000000],
         [A6XXRegs.REG_A6XX_SP_DBG_ECO_CNTL, 0x10000000],
-        # Blob uses 0x1f or 0x1f1f, however these values cause vertices
-        # corruption in some tests.
-        [A6XXRegs.REG_A6XX_PC_MODE_CNTL,    0x0000003f],
+        [A6XXRegs.REG_A6XX_PC_MODE_CNTL,    0x1f1f],
         [A6XXRegs.REG_A6XX_PC_DBG_ECO_CNTL, 0x00100000],
         [A6XXRegs.REG_A7XX_PC_UNKNOWN_9E24, 0x21585600],
         [A6XXRegs.REG_A7XX_VFD_DBG_ECO_CNTL, 0x00008000],
@@ -969,7 +974,7 @@ add_gpus([
         tile_max_w = 1024,
         tile_max_h = 1024,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
         highest_bank_bit = 16,
@@ -990,7 +995,7 @@ add_gpus([
         tile_max_w = 1024,
         tile_max_h = 1024,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
         highest_bank_bit = 16,
@@ -1013,7 +1018,7 @@ add_gpus([
         tile_max_w = 1024,
         tile_max_h = 1024,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
         highest_bank_bit = 16,
@@ -1033,7 +1038,7 @@ add_gpus([
         tile_max_w = 1024,
         tile_max_h = 1024,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
         highest_bank_bit = 16,
@@ -1053,7 +1058,7 @@ add_gpus([
         tile_max_w = 2016,
         tile_max_h = 2032,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
         magic_regs = dict(
@@ -1074,7 +1079,7 @@ add_gpus([
             [A6XXRegs.REG_A7XX_UCHE_UNKNOWN_0E11, 0x00000000],
             [A6XXRegs.REG_A7XX_SP_HLSQ_DBG_ECO_CNTL, 0x00000000],
             [A6XXRegs.REG_A6XX_SP_DBG_ECO_CNTL, 0x10000000],
-            [A6XXRegs.REG_A6XX_PC_MODE_CNTL, 0x1f],
+            [A6XXRegs.REG_A6XX_PC_MODE_CNTL, 0x1f1f],
             [A6XXRegs.REG_A6XX_PC_DBG_ECO_CNTL, 0x00100000],
             [A6XXRegs.REG_A7XX_PC_UNKNOWN_9E24, 0x01585600],
             [A6XXRegs.REG_A7XX_VFD_DBG_ECO_CNTL, 0x00008000],
@@ -1119,7 +1124,7 @@ add_gpus([
         tile_max_w = 2016,
         tile_max_h = 2032,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
         highest_bank_bit = 16,
@@ -1140,7 +1145,7 @@ add_gpus([
         tile_max_w = 2016,
         tile_max_h = 2032,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
         magic_regs = a740_magic_regs,
@@ -1157,9 +1162,7 @@ add_gpus([
             [A6XXRegs.REG_A7XX_UCHE_UNKNOWN_0E11, 0x00000080],
             [A6XXRegs.REG_A7XX_SP_HLSQ_DBG_ECO_CNTL, 0x00000000],
             [A6XXRegs.REG_A6XX_SP_DBG_ECO_CNTL, 0x10000000],
-            # Blob uses 0x1f or 0x1f1f, however these values cause vertices
-            # corruption in some tests.
-            [A6XXRegs.REG_A6XX_PC_MODE_CNTL,    0x0000003f],
+            [A6XXRegs.REG_A6XX_PC_MODE_CNTL,    0x1f1f],
             [A6XXRegs.REG_A6XX_PC_DBG_ECO_CNTL, 0x00100000],
             [A6XXRegs.REG_A7XX_PC_UNKNOWN_9E24, 0x21585600],
             [A6XXRegs.REG_A7XX_VFD_DBG_ECO_CNTL, 0x00008000],
@@ -1202,7 +1205,7 @@ add_gpus([
         tile_max_w = 2016,
         tile_max_h = 2032,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
         magic_regs = dict(
@@ -1225,7 +1228,7 @@ add_gpus([
         tile_max_w = 2016,
         tile_max_h = 2032,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
         highest_bank_bit = 16,
@@ -1286,6 +1289,7 @@ a8xx_base = GPUProps(
         has_rt_workaround = False,
         supports_double_threadsize = True,
         has_dual_wave_dispatch = True,
+        round_robin_errata = False,
     )
 
 # For a8xx, the chicken bit and most other non-ctx reg
@@ -1396,7 +1400,7 @@ add_gpus([
         tile_max_w = 16384,
         tile_max_h = 16384,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
         magic_regs = dict(),
@@ -1416,7 +1420,45 @@ add_gpus([
         tile_max_w = 16416,
         tile_max_h = 16384,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
+        wave_granularity = 2,
+        fibers_per_sp = 128 * 2 * 16,
+        magic_regs = dict(),
+        raw_magic_regs = a8xx_base_raw_magic_regs,
+    ))
+
+# gen8_6_0
+add_gpus([
+        GPUId(chip_id=0x44030000, name="Adreno (TM) 825"),
+    ], A6xxGPUInfo(
+        CHIP.A8XX,
+        [a7xx_base, a7xx_gen3, a8xx_base, a8xx_gen1, GPUProps(
+            gmem_ccu_color_cache_fraction = CCUColorCacheFraction.HALF.value,
+            gmem_per_ccu_color_cache_size = 128 * 1024,
+            gmem_ccu_depth_cache_fraction = CCUColorCacheFraction.HALF.value,
+            gmem_per_ccu_depth_cache_size = 128 * 1024,
+            
+            sysmem_ccu_color_cache_fraction = CCUColorCacheFraction.FULL.value,
+            sysmem_per_ccu_color_cache_size = 128 * 1024,
+            sysmem_ccu_depth_cache_fraction = CCUColorCacheFraction.THREE_QUARTER.value,
+            sysmem_per_ccu_depth_cache_size = 96 * 1024,
+            
+            gmem_vpc_attr_buf_size = 49152, 
+            gmem_vpc_pos_buf_size = 24576,
+            gmem_vpc_bv_pos_buf_size = 32768,
+            
+            disable_gmem = False,
+            gmem_size = 2 * 1024 * 1024,
+            shading_rate_matches_vk = True,
+        )],
+        num_ccu = 4,
+        num_slices = 2,
+        tile_align_w = 64,
+        tile_align_h = 32,
+        tile_max_w = 16416,
+        tile_max_h = 16384,
+        num_vsc_pipes = 32,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
         magic_regs = dict(),
@@ -1473,7 +1515,7 @@ add_gpus([
 
             gmem_vpc_attr_buf_size = 49152,
             gmem_vpc_pos_buf_size = 24576,     
-            gmem_vpc_bv_pos_buf_size = 16384,  
+            gmem_vpc_bv_pos_buf_size = 32768,  
     
             gmem_ccu_color_cache_fraction = CCUColorCacheFraction.HALF.value,
             gmem_per_ccu_color_cache_size = 128 * 1024, 
@@ -1493,7 +1535,7 @@ add_gpus([
         tile_max_w = 16384,
         tile_max_h = 16384,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
         magic_regs = dict(),
@@ -1513,7 +1555,7 @@ add_gpus([
         tile_max_w = 16416,
         tile_max_h = 16384,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
         magic_regs = dict(),
@@ -1521,7 +1563,26 @@ add_gpus([
     ))
 
 add_gpus([
-        GPUId(chip_id=0xffff44070041, name="Adreno (TM) X2-85"),
+        GPUId(chip_id=0xffff44070031, name="Adreno (TM) X2-85"),
+    ], A6xxGPUInfo(
+        CHIP.A8XX,
+        [a7xx_base, a7xx_gen3, a8xx_base, a8xx_gen2],
+        num_ccu = 6,
+        num_slices = 3,
+        tile_align_w = 96,
+        tile_align_h = 32,
+        tile_max_w = 16416,
+        tile_max_h = 16384,
+        num_vsc_pipes = 32,
+        cs_shared_mem_size = 64 * 1024,
+        wave_granularity = 2,
+        fibers_per_sp = 128 * 2 * 16,
+        magic_regs = dict(),
+        raw_magic_regs = a8xx_base_raw_magic_regs,
+    ))
+
+add_gpus([
+        GPUId(chip_id=0xffff44070041, name="Adreno (TM) X2-90"),
     ], A6xxGPUInfo(
         CHIP.A8XX,
         [a7xx_base, a7xx_gen3, a8xx_base, a8xx_gen2],
@@ -1532,7 +1593,7 @@ add_gpus([
         tile_max_w = 16384,
         tile_max_h = 16384,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 32 * 1024,
+        cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
         magic_regs = dict(),

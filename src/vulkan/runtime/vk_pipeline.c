@@ -278,7 +278,12 @@ vk_pipeline_hash_shader_stage_blake3(VkPipelineCreateFlags2KHR pipeline_flags,
    if (module) {
       _mesa_blake3_update(&ctx, module->hash, sizeof(module->hash));
    } else if (minfo) {
-      _mesa_blake3_update(&ctx, minfo->pCode, minfo->codeSize);
+      /* Hash the code first to ensure we end up with the same final hash as
+       * when the module is passed as VkPipelineShaderStageCreateInfo::module.
+       */
+      blake3_hash module_hash;
+      vk_shader_module_hash(minfo, module_hash);
+      _mesa_blake3_update(&ctx, module_hash, sizeof(module_hash));
    } else {
       /* It is legal to pass in arbitrary identifiers as long as they don't exceed
        * the limit. Shaders with bogus identifiers are more or less guaranteed to fail. */
@@ -1271,7 +1276,7 @@ vk_pipeline_to_shader_flags(VkPipelineCreateFlags2KHR pipeline_flags,
        pipeline_layout != NULL &&
        (pipeline_layout->create_flags &
         VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT))
-      shader_flags |= VK_SHADER_CREATE_INDEPENDENT_SETS_BIT_MESA;
+      shader_flags |= VK_SHADER_CREATE_INDEPENDENT_SETS_BIT_KHR;
 
    return shader_flags;
 }
@@ -2725,6 +2730,20 @@ struct vk_rt_pipeline {
 
    uint8_t dynamic_descriptor_offsets[MESA_VK_MAX_DESCRIPTOR_SETS];
 };
+
+uint32_t
+vk_pipeline_get_rt_scratch_size(struct vk_pipeline *pipeline)
+{
+   assert(pipeline->bind_point == VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR);
+   return container_of(pipeline, struct vk_rt_pipeline, base)->scratch_size;
+}
+
+uint32_t
+vk_pipeline_get_rt_ray_queries(struct vk_pipeline *pipeline)
+{
+   assert(pipeline->bind_point == VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR);
+   return container_of(pipeline, struct vk_rt_pipeline, base)->ray_queries;
+}
 
 static struct vk_rt_stage
 vk_rt_stage_ref(struct vk_rt_stage *stage)

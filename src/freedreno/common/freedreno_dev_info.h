@@ -332,6 +332,12 @@ struct fd_dev_info {
       /* True if PC_DGEN_SO_CNTL is present. */
       bool has_pc_dgen_so_cntl;
 
+      /* Some GPUs have an errata where fair scheduling in round-robin mode is
+       * not guaranteed unless at most 8 waves are resident, out of a maximum
+       * of 16.
+       */
+      bool round_robin_errata;
+
       /*
        * A7XX / gen7
        */
@@ -472,6 +478,10 @@ struct fd_dev_info {
       bool has_image_processing;
       /* The amount of valid draw state IDs. */
       uint32_t max_draw_states;
+      /* Whether GRAS_CL_INTERP_CNTL has FACENESS/CENTERRHW and thus
+       * being able to avoid setting ij_linear_sample for FragFace/FragCoord.
+       */
+      bool has_implicit_fragface_fragcoord_ij_linear;
       /* If GMEM needs to be disabled for this GPU */
       bool disable_gmem;
 
@@ -516,7 +526,7 @@ fd_dev_is_supported(const struct fd_dev_id *id) {
 }
 
 /* Final dev info with dbg options and everything else applied.  */
-const struct fd_dev_info fd_dev_info(const struct fd_dev_id *id);
+struct fd_dev_info fd_dev_info(const struct fd_dev_id *id);
 
 const struct fd_dev_info *fd_dev_info_raw_by_name(const char *name);
 

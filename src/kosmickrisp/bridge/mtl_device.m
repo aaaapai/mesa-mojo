@@ -118,6 +118,15 @@ mtl_device_get_registry_id(mtl_device *dev)
    }
 }
 
+bool
+mtl_device_supports_sample_count(mtl_device *dev, uint32_t sample_count)
+{
+   @autoreleasepool {
+      id<MTLDevice> device = (id<MTLDevice>)dev;
+      return [device supportsTextureSampleCount:sample_count];
+   }
+}
+
 struct mtl_size
 mtl_device_max_threads_per_threadgroup(mtl_device *dev)
 {
@@ -144,6 +153,24 @@ mtl_device_max_buffer_length(mtl_device *dev)
    @autoreleasepool {
       id<MTLDevice> device = (id<MTLDevice>)dev;
       return device.maxBufferLength;
+   }
+}
+
+uint64_t
+mtl_device_recommended_max_working_set_size(mtl_device *dev)
+{
+   @autoreleasepool {
+      id<MTLDevice> device = (id<MTLDevice>)dev;
+      return device.recommendedMaxWorkingSetSize;
+   }
+}
+
+uint64_t
+mtl_device_current_allocated_size(mtl_device *dev)
+{
+   @autoreleasepool {
+      id<MTLDevice> device = (id<MTLDevice>)dev;
+      return device.currentAllocatedSize;
    }
 }
 
@@ -197,21 +224,80 @@ mtl_new_texture_descriptor(const struct kk_image_layout *layout)
    }
 }
 
-void
-mtl_heap_texture_size_and_align_with_descriptor(mtl_device *device,
-                                                struct kk_image_layout *layout)
+uint64_t
+mtl_minimum_linear_texture_alignment_for_pixel_format(
+   mtl_device *device, enum mtl_pixel_format format)
 {
    @autoreleasepool {
       id<MTLDevice> dev = (id<MTLDevice>)device;
-      if (layout->optimized_layout) {
-         MTLTextureDescriptor *descriptor = [mtl_new_texture_descriptor(layout) autorelease];
-         descriptor.resourceOptions = KK_MTL_RESOURCE_OPTIONS;
-         MTLSizeAndAlign size_align = [dev heapTextureSizeAndAlignWithDescriptor:descriptor];
-         layout->size_B = size_align.size;
-         layout->align_B = size_align.align;
-      } else {
-         /* Linear textures have different alignment since they are allocated on top of MTLBuffers */
-         layout->align_B = [dev minimumLinearTextureAlignmentForPixelFormat:layout->format.mtl];
-      }
+      return [dev minimumLinearTextureAlignmentForPixelFormat:(MTLPixelFormat)format];
+   }
+}
+
+void
+mtl_heap_texture_size_and_align_with_descriptor(mtl_device *device,
+                                                struct kk_image_layout *layout,
+                                                uint64_t *size_B,
+                                                uint64_t *align_B)
+{
+   @autoreleasepool {
+      id<MTLDevice> dev = (id<MTLDevice>)device;
+      MTLTextureDescriptor *descriptor = [mtl_new_texture_descriptor(layout) autorelease];
+      descriptor.resourceOptions = KK_MTL_RESOURCE_OPTIONS;
+
+      MTLSizeAndAlign size_align = [dev heapTextureSizeAndAlignWithDescriptor:descriptor];
+      if (size_B)
+         *size_B = size_align.size;
+      if (align_B)
+         *align_B = size_align.align;
+   }
+}
+
+uint32_t
+mtl_sparse_tile_size_in_bytes(mtl_device *device) {
+   @autoreleasepool {
+      id<MTLDevice> dev = (id<MTLDevice>)device;
+      return [dev sparseTileSizeInBytes];
+   }
+}
+
+struct mtl_size
+mtl_sparse_tile_size(mtl_device *device, struct kk_image_layout *layout) {
+   @autoreleasepool {
+      id<MTLDevice> dev = (id<MTLDevice>)device;
+      MTLSize tile_size = [dev sparseTileSizeWithTextureType:(MTLTextureType)layout->type
+                                                 pixelFormat:layout->format.mtl
+                                                 sampleCount:layout->sample_count_sa];
+      return (struct mtl_size){tile_size.width, tile_size.height, tile_size.depth};
+   }
+}
+
+struct mtl_size
+mtl_sparse_tile_count(mtl_device *device, struct kk_image_layout *layout,
+                      struct mtl_size tile_size) {
+   @autoreleasepool {
+      id<MTLDevice> dev = (id<MTLDevice>)device;
+      MTLRegion pixel_region = MTLRegionMake3D(
+          0, 0, 0, layout->width_px, layout->height_px, layout->depth_px);
+      MTLRegion tile_region;
+      [dev convertSparsePixelRegions:&pixel_region
+                       toTileRegions:&tile_region
+                        withTileSize:MTLSizeMake(tile_size.x, tile_size.y, tile_size.z)
+                       alignmentMode:MTLSparseTextureRegionAlignmentModeOutward
+                          numRegions:1];
+
+      return (struct mtl_size){tile_region.size.width, tile_region.size.height,
+                               tile_region.size.depth};
+   }
+}
+
+/* Resource creation */
+mtl_buffer *
+mtl_new_buffer_with_bytes_no_copy(mtl_device *device, void* ptr,
+                                  uint64_t size_B)
+{
+   @autoreleasepool {
+      id<MTLDevice> dev = (id<MTLDevice>)device;
+      return [dev newBufferWithBytesNoCopy:ptr length:size_B options:KK_MTL_RESOURCE_OPTIONS deallocator:nil];
    }
 }

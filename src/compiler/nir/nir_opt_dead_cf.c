@@ -132,9 +132,9 @@ def_only_used_in_cf_node(nir_def *def, void *_node)
       nir_block *block;
 
       if (nir_src_is_if(use))
-         block = nir_cf_node_as_block(nir_cf_node_prev(&nir_src_parent_if(use)->cf_node));
+         block = nir_cf_node_as_block(nir_cf_node_prev(&nir_src_use_if(use)->cf_node));
       else
-         block = nir_src_parent_instr(use)->block;
+         block = nir_src_use_instr(use)->block;
 
       /* Note: Normally, the uses of a phi instruction are considered to be
        * used in the block that is the predecessor of the phi corresponding to
@@ -216,10 +216,12 @@ node_is_dead(nir_cf_node *node)
 
             switch (intrin->intrinsic) {
             case nir_intrinsic_load_deref:
+            case nir_intrinsic_load_deref_transpose_amd:
             case nir_intrinsic_load_ssbo:
             case nir_intrinsic_load_global:
             case nir_intrinsic_load_global_bounded:
             case nir_intrinsic_load_global_nv:
+            case nir_intrinsic_load_global_transpose_amd:
             case nir_intrinsic_load_ssbo_intel:
             case nir_intrinsic_load_ssbo_ir3:
                /* If there's a memory barrier after the loop, a load might be
@@ -230,7 +232,8 @@ node_is_dead(nir_cf_node *node)
                 * Consider only loads that the result can be affected by other
                 * invocations.
                 */
-               if (intrin->intrinsic == nir_intrinsic_load_deref) {
+               if (intrin->intrinsic == nir_intrinsic_load_deref ||
+                   intrin->intrinsic == nir_intrinsic_load_deref_transpose_amd) {
                   nir_deref_instr *deref = nir_src_as_deref(intrin->src[0]);
                   if (!nir_deref_mode_may_be(deref, nir_var_mem_ssbo |
                                                        nir_var_mem_shared |

@@ -61,6 +61,9 @@ void mtl_dispatch_threadgroups_with_indirect_buffer(
    mtl_compute_encoder *encoder, mtl_buffer *buffer, uint32_t offset,
    struct mtl_size local_size);
 
+void mtl_memory_barrier_with_scope(mtl_compute_encoder *encoder,
+                                   enum mtl_barrier_scope scope);
+
 /* MTLRenderEncoder */
 mtl_render_encoder *mtl_new_render_command_encoder_with_descriptor(
    mtl_command_buffer *command_buffer, mtl_render_pass_descriptor *descriptor);
@@ -105,8 +108,14 @@ void mtl_set_vertex_amplification_count(mtl_render_encoder *encoder,
 void mtl_set_vertex_buffer(mtl_render_encoder *encoder, mtl_buffer *buffer,
                            uint32_t offset, uint32_t index);
 
+void mtl_set_vertex_bytes(mtl_render_encoder *encoder, const void *bytes,
+                          uint32_t length, uint32_t index);
+
 void mtl_set_fragment_buffer(mtl_render_encoder *encoder, mtl_buffer *buffer,
                              uint32_t offset, uint32_t index);
+
+void mtl_set_fragment_bytes(mtl_render_encoder *encoder, const void *bytes,
+                            uint32_t length, uint32_t index);
 
 void mtl_draw_primitives(mtl_render_encoder *encoder,
                          enum mtl_primitive_type primitve_type,

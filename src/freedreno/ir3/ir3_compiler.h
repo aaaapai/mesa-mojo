@@ -246,6 +246,13 @@ struct ir3_compiler {
 
    bool cat3_rel_offset_0_quirk;
 
+   /*
+    * Some low-bandwidth parts benefit from spending a little more constant
+    * file space to merge nearby promoted UBO ranges. This reduces the number
+    * of memory-backed UBO fetch windows left in hot shader code.
+    */
+   bool coalesce_ubo_push_ranges;
+
    struct {
       /* The number of cycles needed for the result of one ALU operation to be
        * available to another ALU operation. Only valid when the halfness of the
@@ -321,12 +328,13 @@ enum ir3_shader_debug {
    IR3_DBG_NODESCPREFETCH = BITFIELD_BIT(18),
    IR3_DBG_EXPANDRPT = BITFIELD_BIT(19),
    IR3_DBG_ASM_ROUNDTRIP = BITFIELD_BIT(20),
+   IR3_DBG_THREAD64 = BITFIELD_BIT(21),
 
    /* MESA_DEBUG-only options: */
-   IR3_DBG_SCHEDMSGS = BITFIELD_BIT(21),
-   IR3_DBG_RAMSGS = BITFIELD_BIT(22),
-   IR3_DBG_NOALIASTEX = BITFIELD_BIT(23),
-   IR3_DBG_NOALIASRT = BITFIELD_BIT(24),
+   IR3_DBG_SCHEDMSGS = BITFIELD_BIT(22),
+   IR3_DBG_RAMSGS = BITFIELD_BIT(23),
+   IR3_DBG_NOALIASTEX = BITFIELD_BIT(24),
+   IR3_DBG_NOALIASRT = BITFIELD_BIT(25),
 };
 
 extern enum ir3_shader_debug ir3_shader_debug;

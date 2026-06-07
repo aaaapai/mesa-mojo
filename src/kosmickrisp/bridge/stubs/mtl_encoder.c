@@ -59,6 +59,12 @@ mtl_copy_from_texture_to_texture(mtl_blit_encoder *blit_enc_handle,
 {
 }
 
+void
+mtl_memory_barrier_with_scope(mtl_compute_encoder *encoder,
+                              enum mtl_barrier_scope scope)
+{
+}
+
 /* MTLComputeEncoder */
 mtl_compute_encoder *
 mtl_new_compute_command_encoder(mtl_command_buffer *cmd_buffer)
@@ -199,8 +205,20 @@ mtl_set_vertex_buffer(mtl_render_encoder *encoder, mtl_buffer *buffer,
 }
 
 void
+mtl_set_vertex_bytes(mtl_render_encoder *encoder, const void *bytes,
+                     uint32_t length, uint32_t index)
+{
+}
+
+void
 mtl_set_fragment_buffer(mtl_render_encoder *encoder, mtl_buffer *buffer,
                         uint32_t offset, uint32_t index)
+{
+}
+
+void
+mtl_set_fragment_bytes(mtl_render_encoder *encoder, const void *bytes,
+                       uint32_t length, uint32_t index)
 {
 }
 

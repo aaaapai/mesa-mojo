@@ -208,11 +208,8 @@ mtl_dispatch_threads(mtl_compute_encoder *encoder,
 {
    @autoreleasepool {
       id<MTLComputeCommandEncoder> enc = (id<MTLComputeCommandEncoder>)encoder;
-      MTLSize thread_count = MTLSizeMake(grid_size.x * local_size.x,
-                                         grid_size.y * local_size.y,
-                                         grid_size.z * local_size.z);
-      MTLSize threads_per_threadgroup = MTLSizeMake(local_size.x,
-                                                    local_size.y,
+      MTLSize thread_count = MTLSizeMake(grid_size.x, grid_size.y, grid_size.z);
+      MTLSize threads_per_threadgroup = MTLSizeMake(local_size.x, local_size.y,
                                                     local_size.z);
 
       // TODO_KOSMICKRISP can we rely on nonuniform threadgroup size support?
@@ -234,6 +231,16 @@ mtl_dispatch_threadgroups_with_indirect_buffer(mtl_compute_encoder *encoder,
                                                     local_size.z);
 
       [enc dispatchThreadgroupsWithIndirectBuffer:buf indirectBufferOffset:offset threadsPerThreadgroup:threads_per_threadgroup];
+   }
+}
+
+void
+mtl_memory_barrier_with_scope(mtl_compute_encoder *encoder,
+                              enum mtl_barrier_scope scope)
+{
+   @autoreleasepool {
+      id<MTLComputeCommandEncoder> enc = (id<MTLComputeCommandEncoder>)encoder;
+      [enc memoryBarrierWithScope:(MTLBarrierScope)scope];
    }
 }
 
@@ -402,6 +409,16 @@ mtl_set_vertex_buffer(mtl_render_encoder *encoder, mtl_buffer *buffer,
 }
 
 void
+mtl_set_vertex_bytes(mtl_render_encoder *encoder, const void *bytes,
+                     uint32_t length, uint32_t index)
+{
+   @autoreleasepool {
+      id<MTLRenderCommandEncoder> enc = (id<MTLRenderCommandEncoder>)encoder;
+      [enc setVertexBytes:bytes length:length atIndex:index];
+   }
+}
+
+void
 mtl_set_fragment_buffer(mtl_render_encoder *encoder, mtl_buffer *buffer,
                         uint32_t offset, uint32_t index)
 {
@@ -409,6 +426,16 @@ mtl_set_fragment_buffer(mtl_render_encoder *encoder, mtl_buffer *buffer,
       id<MTLRenderCommandEncoder> enc = (id<MTLRenderCommandEncoder>)encoder;
       id<MTLBuffer> buf = (id<MTLBuffer>)buffer;
       [enc setFragmentBuffer:buf offset:offset atIndex:index];
+   }
+}
+
+void
+mtl_set_fragment_bytes(mtl_render_encoder *encoder, const void *bytes,
+                       uint32_t length, uint32_t index)
+{
+   @autoreleasepool {
+      id<MTLRenderCommandEncoder> enc = (id<MTLRenderCommandEncoder>)encoder;
+      [enc setFragmentBytes:bytes length:length atIndex:index];
    }
 }
 

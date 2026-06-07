@@ -234,7 +234,8 @@ static bool handle_env_var_force_family(struct radeon_info *info)
 }
 
 void
-ac_fill_compiler_info(struct radeon_info *info, const struct drm_amdgpu_info_device *device_info)
+ac_fill_compiler_info(struct radeon_info *info, const struct drm_amdgpu_info_device *device_info,
+                      bool compat_mode)
 {
    /* We use ac_compiler_info for shader cache keys, so make sure there is no padding. */
    STATIC_ASSERT(sizeof(enum amd_gfx_level) == 4);
@@ -420,6 +421,11 @@ ac_fill_compiler_info(struct radeon_info *info, const struct drm_amdgpu_info_dev
     * Only GFX9 works as expected.
     */
    out->has_smem_with_null_prt_bug = info->gfx_level <= GFX12 && info->gfx_level != GFX9;
+
+   if (compat_mode && info->family == CHIP_REMBRANDT) {
+      out->has_ngg_passthru_no_msg = false;
+      out->has_vrs_frag_pos_z_bug = true;
+   }
 }
 
 void
@@ -855,11 +861,27 @@ ac_identify_chip(struct radeon_info *info, const struct drm_amdgpu_info_device *
       break;
    }
 
-    if (info->ip[AMD_IP_VPE].num_queues)
-      info->vpe_ip_version = (enum vpe_version)VPE_VERSION_VALUE(
-                                                info->ip[AMD_IP_VPE].ver_major,
-                                                info->ip[AMD_IP_VPE].ver_minor,
-                                                info->ip[AMD_IP_VPE].ver_rev);
+   switch(VPE_VERSION_VALUE(info->ip[AMD_IP_VPE].ver_major,
+                            info->ip[AMD_IP_VPE].ver_minor,
+                            info->ip[AMD_IP_VPE].ver_rev)) {
+   case VPE_VERSION_VALUE(6, 1, 0):
+   case VPE_VERSION_VALUE(6, 1, 3):
+      info->vpe_ip_version = VPE_1_0;
+      break;
+   case VPE_VERSION_VALUE(6, 1, 1):
+   case VPE_VERSION_VALUE(6, 1, 2):
+      info->vpe_ip_version = VPE_1_1;
+      break;
+   case VPE_VERSION_VALUE(2, 0, 0):
+      info->vpe_ip_version = VPE_2_0;
+      break;
+   case VPE_VERSION_VALUE(2, 2, 0):
+      info->vpe_ip_version = VPE_2_2;
+      break;
+   default:
+      info->vpe_ip_version = VPE_UNKNOWN;
+      break;
+   }
 
    /* Convert the SDMA version in the current GPU to an enum. */
    info->sdma_ip_version =
@@ -1390,7 +1412,7 @@ void ac_fill_tess_info(struct radeon_info *info)
 
 enum ac_query_gpu_info_result
 ac_query_gpu_info(int fd, void *dev_p, struct radeon_info *info,
-                  bool require_pci_bus_info)
+                  bool require_pci_bus_info, bool compiler_compat_mode)
 {
    struct amdgpu_gpu_info amdinfo;
    struct drm_amdgpu_info_device device_info = {0};
@@ -1535,11 +1557,6 @@ ac_query_gpu_info(int fd, void *dev_p, struct radeon_info *info,
       return AC_QUERY_GPU_INFO_FAIL;
    }
 
-   ac_drm_query_video_caps_info(dev, AMDGPU_INFO_VIDEO_CAPS_DECODE,
-                                sizeof(info->dec_caps), &(info->dec_caps));
-   ac_drm_query_video_caps_info(dev, AMDGPU_INFO_VIDEO_CAPS_ENCODE,
-                                sizeof(info->enc_caps), &(info->enc_caps));
-
    if (!ac_identify_chip(info, &device_info))
       return AC_QUERY_GPU_INFO_UNIMPLEMENTED_HW;
 
@@ -1563,7 +1580,9 @@ ac_query_gpu_info(int fd, void *dev_p, struct radeon_info *info,
 
    ac_fill_tess_info(info);
 
-   ac_fill_compiler_info(info, &device_info);
+   ac_fill_compiler_info(info, &device_info, compiler_compat_mode);
+
+   ac_fill_video_info(info, dev);
 
    /* BIG_PAGE is supported since gfx10.3 and requires VRAM. VRAM is only guaranteed
     * with AMDGPU_GEM_CREATE_DISCARDABLE.
@@ -2000,37 +2019,10 @@ void ac_print_gpu_info(FILE *f, const struct radeon_info *info, int fd)
    if (info->ip[AMD_IP_VCN_JPEG].num_queues)
       fprintf(f, "    jpeg_decode = %u\n", info->ip[AMD_IP_VCN_JPEG].num_instances);
 
-   if (info->ip[AMD_IP_VCN_DEC].num_queues || info->ip[AMD_IP_VCN_UNIFIED].num_queues
-       || info->ip[AMD_IP_VCE].num_queues || info->ip[AMD_IP_UVD].num_queues) {
-      char max_res_dec[64] = {0}, max_res_enc[64] = {0};
-      char codec_str[][8] = {
-         [AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_MPEG2] = "mpeg2",
-         [AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_MPEG4] = "mpeg4",
-         [AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_VC1] = "vc1",
-         [AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_MPEG4_AVC] = "h264",
-         [AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_HEVC] = "hevc",
-         [AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_JPEG] = "jpeg",
-         [AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_VP9] = "vp9",
-         [AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_AV1] = "av1",
-      };
-      fprintf(f, "    %-8s %-4s %-16s %-4s %-16s\n",
-              "codec", "dec", "max_resolution", "enc", "max_resolution");
-      for (unsigned i = 0; i < AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_COUNT; i++) {
-         if (info->dec_caps.codec_info[i].valid)
-            sprintf(max_res_dec, "%ux%u", info->dec_caps.codec_info[i].max_width,
-                    info->dec_caps.codec_info[i].max_height);
-         else
-            sprintf(max_res_dec, "%s", "-");
-         if (info->enc_caps.codec_info[i].valid)
-            sprintf(max_res_enc, "%ux%u", info->enc_caps.codec_info[i].max_width,
-                    info->enc_caps.codec_info[i].max_height);
-         else
-            sprintf(max_res_enc, "%s", "-");
-         fprintf(f, "    %-8s %-4s %-16s %-4s %-16s\n", codec_str[i],
-                 info->dec_caps.codec_info[i].valid ? "*" : "-", max_res_dec,
-                 info->enc_caps.codec_info[i].valid ? "*" : "-", max_res_enc);
-      }
-   }
+   if (info->ip[AMD_IP_VPE].num_queues)
+      fprintf(f, "    vpe = %u\n", info->ip[AMD_IP_VPE].num_instances);
+
+   ac_print_video_info(f, info);
 
    fprintf(f, "Kernel & winsys capabilities:\n");
    fprintf(f, "    drm = %i.%i.%i\n", info->drm_major, info->drm_minor, info->drm_patchlevel);

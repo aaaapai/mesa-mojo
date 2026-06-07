@@ -134,6 +134,7 @@ static void
 get_device_extensions(const struct anv_physical_device *device,
                       struct vk_device_extension_table *ext)
 {
+   const struct anv_instance *instance = device->instance;
    const bool rt_enabled = ANV_SUPPORT_RT && device->info.has_ray_tracing &&
                            !intel_use_jay_any_stage(&device->info);
    const bool hw_video_encode_supported = device->info.verx10 < 125;
@@ -143,7 +144,7 @@ get_device_extensions(const struct anv_physical_device *device,
 
    *ext = (struct vk_device_extension_table) {
       .KHR_8bit_storage                      = true,
-      .KHR_16bit_storage                     = !device->instance->no_16bit,
+      .KHR_16bit_storage                     = !instance->drirc.debug.no_16bit,
       .KHR_acceleration_structure            = rt_enabled,
       .KHR_bind_memory2                      = true,
       .KHR_buffer_device_address             = true,
@@ -152,6 +153,7 @@ get_device_extensions(const struct anv_physical_device *device,
       .KHR_cooperative_matrix                = device->has_cooperative_matrix,
       .NV_cooperative_matrix2                = device->has_cooperative_matrix,
       .KHR_copy_commands2                    = true,
+      .KHR_copy_memory_indirect              = true,
       .KHR_create_renderpass2                = true,
       .KHR_dedicated_allocation              = true,
       .KHR_deferred_host_operations          = true,
@@ -159,6 +161,7 @@ get_device_extensions(const struct anv_physical_device *device,
       .KHR_depth_stencil_resolve             = true,
       .KHR_descriptor_update_template        = true,
       .KHR_device_group                      = true,
+      .KHR_device_address_commands           = true,
       .KHR_draw_indirect_count               = true,
       .KHR_driver_properties                 = true,
       .KHR_dynamic_rendering                 = true,
@@ -194,6 +197,7 @@ get_device_extensions(const struct anv_physical_device *device,
       .KHR_maintenance8                      = true,
       .KHR_maintenance9                      = true,
       .KHR_maintenance10                     = true,
+      .KHR_maintenance11                     = true,
       .KHR_map_memory2                       = true,
       .KHR_multiview                         = true,
       .KHR_performance_query =
@@ -225,7 +229,7 @@ get_device_extensions(const struct anv_physical_device *device,
       .KHR_shader_constant_data              = true,
       .KHR_shader_draw_parameters            = true,
       .KHR_shader_expect_assume              = true,
-      .KHR_shader_float16_int8               = !device->instance->no_16bit,
+      .KHR_shader_float16_int8               = !instance->drirc.debug.no_16bit,
       .KHR_shader_float_controls             = true,
       .KHR_shader_float_controls2            = true,
       .KHR_shader_integer_dot_product        = true,
@@ -284,6 +288,7 @@ get_device_extensions(const struct anv_physical_device *device,
        */
       .EXT_conservative_rasterization        = device->info.platform != INTEL_PLATFORM_SKL,
       .EXT_custom_border_color               = true,
+      .EXT_debug_marker                      = true,
       .EXT_depth_bias_control                = true,
       .EXT_depth_clamp_control               = true,
       .EXT_depth_clamp_zero_one              = true,
@@ -291,8 +296,20 @@ get_device_extensions(const struct anv_physical_device *device,
       .EXT_depth_clip_enable                 = true,
       .EXT_depth_range_unrestricted          = device->info.ver >= 20,
       .EXT_descriptor_buffer                 = true,
+      .EXT_descriptor_heap                   = ANV_DEBUG(EXPERIMENTAL),
       .EXT_descriptor_indexing               = true,
       .EXT_device_address_binding_report     = true,
+      /* Emitting a single compute dispatch potentially lot of memory (> 4KiB)
+       * on device prior to Gfx12.5 due to the fact that we need to emit 32B
+       * worth of data per subgroup in a workgroup, see anv_dgc_layout.c. So
+       * make it experimental on those devices for now, since vkd3d-proton
+       * will try to allocate lots of DGC preprocess buffer and those
+       * requiring to be in the dynamic visible heap, things run out of VMA
+       * pretty quick. We can some something less memory intensive with a ring
+       * buffer approach, at the expense of late preprocessing. But this is
+       * for later.
+       */
+      .EXT_device_generated_commands         = device->info.verx10 >= 125 || ANV_DEBUG(EXPERIMENTAL),
       .EXT_device_memory_report              = true,
 #ifdef VK_USE_PLATFORM_DISPLAY_KHR
       .EXT_display_control                   = true,
@@ -314,12 +331,7 @@ get_device_extensions(const struct anv_physical_device *device,
       .EXT_host_image_copy                   = true,
       .EXT_host_query_reset                  = true,
       .EXT_image_2d_view_of_3d               = true,
-      /* Because of Xe2 PAT selected compression and the Vulkan spec
-       * requirement to always return the same memory types for Images with
-       * same properties we can't support EXT_image_compression_control on Xe2+
-       */
-      .EXT_image_compression_control         = device->instance->compression_control_enabled &&
-                                               device->info.ver < 20,
+      .EXT_image_compression_control         = device->expose_compression_control,
       .EXT_image_drm_format_modifier         = true,
       .EXT_image_robustness                  = true,
       .EXT_image_sliced_view_of_3d           = true,
@@ -378,6 +390,7 @@ get_device_extensions(const struct anv_physical_device *device,
       .EXT_shader_uniform_buffer_unsized_array = true,
       .EXT_subgroup_size_control             = !device->brw_disable_subgroup_size_control,
 #ifdef ANV_USE_WSI_PLATFORM
+      .EXT_image_compression_control_swapchain = device->expose_compression_control,
       .EXT_swapchain_maintenance1            = true,
 #endif
       .EXT_texel_buffer_alignment            = true,
@@ -390,6 +403,9 @@ get_device_extensions(const struct anv_physical_device *device,
       .AMD_buffer_marker                     = true,
       .AMD_texture_gather_bias_lod           = device->info.ver >= 20,
       .GOOGLE_decorate_string                = true,
+#ifdef ANV_USE_WSI_PLATFORM
+      .GOOGLE_display_timing = wsi_instance_supports_google_display_timing(&device->instance->vk),
+#endif
       .GOOGLE_hlsl_functionality1            = true,
       .GOOGLE_user_type                      = true,
       .INTEL_performance_query               = device->perf &&
@@ -412,7 +428,8 @@ static void
 get_features(const struct anv_physical_device *pdevice,
              struct vk_features *features)
 {
-   struct vk_app_info *app_info = &pdevice->instance->vk.app_info;
+   const struct anv_instance *instance = pdevice->instance;
+   const struct vk_app_info *app_info = &instance->vk.app_info;
 
    const bool rt_enabled = ANV_SUPPORT_RT && pdevice->info.has_ray_tracing;
 
@@ -459,7 +476,7 @@ get_features(const struct anv_physical_device *pdevice,
        * read/writes, on Gfx11 & Gfx12.0 we emulate for 3 formats.
        */
       .shaderStorageImageReadWithoutFormat      = pdevice->info.verx10 >= 125 ||
-                                                  pdevice->instance->emulate_read_without_format,
+                                                  instance->drirc.debug.read_without_format_emu,
       .shaderStorageImageWriteWithoutFormat     = true,
       .shaderUniformBufferArrayDynamicIndexing  = true,
       .shaderSampledImageArrayDynamicIndexing   = true,
@@ -468,7 +485,7 @@ get_features(const struct anv_physical_device *pdevice,
       .shaderClipDistance                       = true,
       .shaderCullDistance                       = true,
       .shaderFloat64                            = pdevice->info.has_64bit_float ||
-                                                  pdevice->instance->fp64_workaround_enabled,
+                                                  instance->drirc.debug.fp64_emu,
       .shaderInt64                              = true,
       .shaderInt16                              = true,
       .shaderResourceMinLod                     = true,
@@ -489,8 +506,8 @@ get_features(const struct anv_physical_device *pdevice,
       .inheritedQueries                         = true,
 
       /* Vulkan 1.1 */
-      .storageBuffer16BitAccess            = !pdevice->instance->no_16bit,
-      .uniformAndStorageBuffer16BitAccess  = !pdevice->instance->no_16bit,
+      .storageBuffer16BitAccess            = !instance->drirc.debug.no_16bit,
+      .uniformAndStorageBuffer16BitAccess  = !instance->drirc.debug.no_16bit,
       .storagePushConstant16               = true,
       .storageInputOutput16                = true,
       .multiview                           = true,
@@ -510,8 +527,8 @@ get_features(const struct anv_physical_device *pdevice,
       .storagePushConstant8                = true,
       .shaderBufferInt64Atomics            = true,
       .shaderSharedInt64Atomics            = false,
-      .shaderFloat16                       = !pdevice->instance->no_16bit,
-      .shaderInt8                          = !pdevice->instance->no_16bit,
+      .shaderFloat16                       = !instance->drirc.debug.no_16bit,
+      .shaderInt8                          = !instance->drirc.debug.no_16bit,
 
       .descriptorIndexing                                 = true,
       .shaderInputAttachmentArrayDynamicIndexing          = false,
@@ -609,7 +626,7 @@ get_features(const struct anv_physical_device *pdevice,
       /* VK_EXT_custom_border_color */
       .customBorderColors = true,
       .customBorderColorWithoutFormat =
-         pdevice->instance->custom_border_colors_without_format,
+         instance->drirc.debug.custom_border_colors_without_format,
 
       /* VK_KHR_depth_clamp_zero_one */
       .depthClampZeroOne = true,
@@ -937,7 +954,7 @@ get_features(const struct anv_physical_device *pdevice,
       .videoDecodeVP9 = true,
 
       /* VK_EXT_image_compression_control */
-      .imageCompressionControl = true,
+      .imageCompressionControl = pdevice->expose_compression_control,
 
       /* VK_KHR_shader_float_controls2 */
       .shaderFloatControls2 = true,
@@ -1009,6 +1026,10 @@ get_features(const struct anv_physical_device *pdevice,
       /* VK_KHR_pipeline_binary */
       .pipelineBinaries = true,
 
+      /* VK_KHR_copy_memory_indirect */
+      .indirectMemoryCopy = true,
+      .indirectMemoryToImageCopy = pdevice->info.verx10 >= 125,
+
 #ifdef ANV_USE_WSI_PLATFORM
       /* VK_EXT_present_timing */
       .presentTiming = true,
@@ -1027,6 +1048,23 @@ get_features(const struct anv_physical_device *pdevice,
 
       /* VK_KHR_shader_constant_data */
       .shaderConstantData = true,
+
+      /* VK_EXT_descriptor_heap */
+      .descriptorHeap = true,
+      .descriptorHeapCaptureReplay = true,
+
+      /* VK_EXT_device_generated_commands */
+      .deviceGeneratedCommands = true,
+      .dynamicGeneratedPipelineLayout = true,
+
+      /* VK_KHR_maintenance11 */
+      .maintenance11 = true,
+
+      /* VK_KHR_device_address_commands */
+      .deviceAddressCommands = true,
+
+      /* VK_EXT_swapchain_compression_control */
+      .imageCompressionControlSwapchain = pdevice->expose_compression_control,
    };
 
    /* The new DOOM and Wolfenstein games require depthBounds without
@@ -1329,8 +1367,8 @@ get_properties(const struct anv_physical_device *pdevice,
    *props = (struct vk_properties) {
       .apiVersion = ANV_API_VERSION,
       .driverVersion = vk_get_driver_version(),
-      .vendorID = pdevice->instance->force_vk_vendor != 0 ?
-                  pdevice->instance->force_vk_vendor : 0x8086,
+      .vendorID = pdevice->instance->drirc.debug.force_vk_vendor != 0 ?
+                  pdevice->instance->drirc.debug.force_vk_vendor : 0x8086,
       .deviceID = pdevice->info.pci_device_id,
       .deviceType = pdevice->info.has_local_mem ?
                     VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU :
@@ -1400,7 +1438,7 @@ get_properties(const struct anv_physical_device *pdevice,
                                                   desc_limits.max_images,
       .maxComputeSharedMemorySize               = MIN2(MAX_SLM_SIZE,
                                                        intel_device_info_get_max_slm_size(&pdevice->info)),
-      .maxComputeWorkGroupCount                 = { 65535, 65535, 65535 },
+      .maxComputeWorkGroupCount                 = { 0x7fffffff, 65535, 65535 },
       .maxComputeWorkGroupInvocations           = max_workgroup_size,
       .maxComputeWorkGroupSize = {
          max_workgroup_size,
@@ -1674,8 +1712,16 @@ get_properties(const struct anv_physical_device *pdevice,
       props->conservativePointAndLineRasterization = false;
       props->degenerateTrianglesRasterized = true;
       props->degenerateLinesRasterized = false;
-      props->fullyCoveredFragmentShaderInputVariable = false;
-      props->conservativeRasterizationPostDepthCoverage = true;
+
+      const bool fully_covered =
+         pdevice->instance->drirc.features.fully_covered &&
+         pdevice->info.verx10 >= 125;
+
+      props->fullyCoveredFragmentShaderInputVariable = fully_covered;
+      /* InnerCoverage, used to implement fully covered, is mutually exclusive
+       * with PostDepthCoverage.
+       */
+      props->conservativeRasterizationPostDepthCoverage = !fully_covered;
    }
 
    /* VK_EXT_custom_border_color */
@@ -1745,6 +1791,67 @@ get_properties(const struct anv_physical_device *pdevice,
       props->resourceDescriptorBufferAddressSpaceSize = pdevice->va.dynamic_visible_pool.size;
       props->descriptorBufferAddressSpaceSize = pdevice->va.dynamic_visible_pool.size;
       props->samplerDescriptorBufferAddressSpaceSize = pdevice->va.dynamic_visible_pool.size;
+   }
+
+   /* VK_EXT_descriptor_heap */
+   {
+      props->samplerHeapAlignment = 64;
+      props->resourceHeapAlignment = 64;
+      props->maxSamplerHeapSize = pdevice->va.dynamic_visible_pool.size;
+      props->maxResourceHeapSize = anv_physical_device_bindless_heap_size(pdevice,
+                                                                          true);
+      props->minSamplerHeapReservedRange = 0;
+      props->minSamplerHeapReservedRangeWithEmbedded = 0;
+      props->minResourceHeapReservedRange = 0;
+      props->samplerDescriptorSize = ANV_SAMPLER_STATE_SIZE;
+      props->imageDescriptorSize = ANV_SURFACE_STATE_SIZE;
+      props->bufferDescriptorSize = ANV_SURFACE_STATE_SIZE;
+      props->samplerDescriptorAlignment = ANV_SAMPLER_STATE_SIZE;
+      props->imageDescriptorAlignment = ANV_SURFACE_STATE_SIZE;
+      props->bufferDescriptorAlignment = ANV_SURFACE_STATE_SIZE;
+      props->maxPushDataSize = MAX_PUSH_CONSTANTS_SIZE;
+      props->imageCaptureReplayOpaqueDataSize = 8;
+      props->maxDescriptorHeapEmbeddedSamplers = MAX_EMBEDDED_SAMPLERS;
+      props->samplerYcbcrConversionCount = 3;
+      props->sparseDescriptorHeaps = pdevice->info.kmd_type == INTEL_KMD_TYPE_XE;
+      props->protectedDescriptorHeaps = false;
+   }
+
+   /* VK_EXT_device_generated_commands */
+   {
+      VkShaderStageFlags stages =
+         VK_SHADER_STAGE_VERTEX_BIT |
+         VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |
+         VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT |
+         VK_SHADER_STAGE_GEOMETRY_BIT |
+         VK_SHADER_STAGE_FRAGMENT_BIT |
+         VK_SHADER_STAGE_COMPUTE_BIT;
+      /* TODO: fixup Wa_18019110168 */
+      if (pdevice->info.has_mesh_shading &&
+          !intel_needs_workaround(&pdevice->info, 18019110168))
+         stages |= VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT;
+      if (ANV_SUPPORT_RT && pdevice->info.has_ray_tracing)
+         stages |= ANV_RT_STAGE_BITS;
+
+      const VkShaderStageFlags indirect_stages =
+         stages & (VK_SHADER_STAGE_COMPUTE_BIT | ANV_RT_STAGE_BITS);
+
+      props->maxIndirectPipelineCount = 1 << 12; /* spec minimum */
+      props->maxIndirectShaderObjectCount = 1 << 12; /* spec minimum */
+      props->maxIndirectSequenceCount = 1 << 20; /* spec minimum */
+      props->maxIndirectCommandsTokenCount = 32;
+      props->maxIndirectCommandsTokenOffset = 64 * 1024;
+      props->maxIndirectCommandsIndirectStride = UINT32_MAX;
+      props->supportedIndirectCommandsInputModes = VK_INDIRECT_COMMANDS_INPUT_MODE_VULKAN_INDEX_BUFFER_EXT |
+                                                   VK_INDIRECT_COMMANDS_INPUT_MODE_DXGI_INDEX_BUFFER_EXT;
+      props->supportedIndirectCommandsShaderStages = stages;
+      props->supportedIndirectCommandsShaderStagesShaderBinding = indirect_stages;
+      props->supportedIndirectCommandsShaderStagesPipelineBinding = indirect_stages;
+      props->deviceGeneratedCommandsTransformFeedback = true;
+      /* Xe2+ has an indirect instruction, unfortunately it does not have a HW
+       * generated gl_DrawID so we cannot implement this...
+       */
+      props->deviceGeneratedCommandsMultiDrawIndirectCount = false;
    }
 
    /* VK_EXT_extended_dynamic_state3 */
@@ -2116,6 +2223,11 @@ get_properties(const struct anv_physical_device *pdevice,
        */
       props->shaderBinaryVersion = 0;
    }
+
+   /* VK_KHR_copy_memory_indirect */
+   {
+      props->supportedQueues = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT;
+   }
 }
 
 /* This function restricts the maximum size of system memory heap. The
@@ -2291,7 +2403,7 @@ anv_physical_device_init_heaps(struct anv_physical_device *device, int fd)
     * is now inconsistent with some of the memory types, but the game doesn't
     * seem to care about it.
     */
-   if (device->instance->anv_fake_nonlocal_memory &&
+   if (device->instance->drirc.debug.fake_nonlocal_mem &&
        !anv_physical_device_has_vram(device)) {
       const uint32_t base_types_count = device->memory.type_count;
       for (int i = 0; i < base_types_count; i++) {
@@ -2749,7 +2861,8 @@ anv_physical_device_try_create(struct vk_instance *vk_instance,
        device->info.xe_has_state_cache_perf_fix);
 
    device->rt_change_needs_flush =
-      !instance->state_cache_perf_fix || !platform_supports_btp_bit_rcc;
+      !instance->drirc.perf.state_cache_perf_fix ||
+      !platform_supports_btp_bit_rcc;
 
    device->gtt_size = device->info.gtt_size ? device->info.gtt_size :
                                               device->info.aperture_bytes;
@@ -2771,28 +2884,42 @@ anv_physical_device_try_create(struct vk_instance *vk_instance,
    device->has_astc_ldr =
       isl_format_supports_sampling(&device->info,
                                    ISL_FORMAT_ASTC_LDR_2D_4X4_FLT16);
-   if (!device->has_astc_ldr &&
-       driQueryOptionb(&device->instance->dri_options, "vk_require_astc"))
+   if (!device->has_astc_ldr && instance->drirc.features.require_astc)
       device->emu_astc_ldr = true;
    if (devinfo.ver == 9 && !intel_device_info_is_9lp(&devinfo)) {
       device->flush_astc_ldr_void_extent_denorms =
          device->has_astc_ldr && !device->emu_astc_ldr;
    }
    device->disable_fcv = device->info.verx10 >= 125 ||
-                         instance->disable_fcv;
+                         instance->drirc.debug.disable_fcv;
    device->brw_disable_subgroup_size_control =
       !intel_use_jay(&device->info, MESA_SHADER_COMPUTE) &&
-      driQueryOptionb(&device->instance->dri_options,
-                      "anv_brw_disable_subgroup_size_control");
+      instance->drirc.debug.disable_subgroup_size_control;
 
    result = anv_physical_device_init_heaps(device, fd);
    if (result != VK_SUCCESS)
       goto fail_base;
 
    device->has_cooperative_matrix =
-      (device->info.has_systolic || debug_get_bool_option("INTEL_LOWER_DPAS", false)) &&
-      device->info.cooperative_matrix_configurations[0].scope != INTEL_CMAT_SCOPE_NONE &&
+      (device->info.has_systolic ||
+       debug_get_bool_option("INTEL_LOWER_DPAS", false)) &&
       !intel_use_jay_any_stage(&device->info);
+
+   /* Because of Xe2 PAT selected compression and the Vulkan spec requirement
+    * to always return the same memory types for Images with same properties
+    * we can't support EXT_image_compression_control on Xe2+.
+    */
+   device->has_compression_control = device->info.ver < 20;
+
+   /* Whether we want to expose the extension depends on DRIRC (for platforms
+    * that support this or fake on Xe2+ due to Android VP17 profile
+    * requirement).
+    */
+   device->expose_compression_control =
+      (instance->drirc.features.fake_image_compression_control_xe2_plus &&
+       device->info.ver >= 20) ||
+      (instance->drirc.features.compression_control_enabled &&
+       device->has_compression_control);
 
    if (is_virtio) {
       struct util_sync_provider *sync = intel_virtio_sync_provider(fd);
@@ -2813,7 +2940,7 @@ anv_physical_device_try_create(struct vk_instance *vk_instance,
 
    device->indirect_descriptors =
       !intel_has_extended_bindless(&devinfo) ||
-      driQueryOptionb(&instance->dri_options, "force_indirect_descriptors");
+      instance->drirc.debug.force_indirect_descriptors;
 
    device->alloc_aux_tt_mem =
       device->info.has_aux_map && device->info.verx10 >= 125;
@@ -2838,12 +2965,12 @@ anv_physical_device_try_create(struct vk_instance *vk_instance,
       }
    }
    if (device->sparse_type == ANV_SPARSE_TYPE_NOT_SUPPORTED) {
-      if (instance->has_fake_sparse)
+      if (instance->drirc.features.fake_sparse)
          device->sparse_type = ANV_SPARSE_TYPE_FAKE;
    }
 
    device->always_flush_cache = INTEL_DEBUG(DEBUG_STALL) ||
-      driQueryOptionb(&instance->dri_options, "always_flush_cache");
+      instance->drirc.debug.always_flush_cache;
 
    /* The ring buffer mechanism for page fault reporting is not supported until
     * PVC (unsupported by our Mesa driver), so we keep the scratch page enabled
@@ -2851,7 +2978,7 @@ anv_physical_device_try_create(struct vk_instance *vk_instance,
     */
    device->has_scratch_page =
       device->info.ver < 20 || device->info.kmd_type == INTEL_KMD_TYPE_I915 ||
-      driQueryOptionb(&instance->dri_options, "anv_enable_scratch_page");
+      instance->drirc.features.scratch_page;
 
    device->compiler = brw_compiler_create(NULL, &device->info);
    if (device->compiler == NULL) {
@@ -2860,15 +2987,12 @@ anv_physical_device_try_create(struct vk_instance *vk_instance,
    }
    device->compiler->shader_debug_log = compiler_debug_log;
    device->compiler->shader_perf_log = compiler_perf_log;
-   device->compiler->spilling_rate =
-      driQueryOptioni(&instance->dri_options, "shader_spilling_rate");
+   device->compiler->spilling_rate = instance->drirc.debug.shader_spilling_rate;
 
    isl_device_init(&device->isl_dev, &device->info);
    device->isl_dev.buffer_length_in_aux_addr = !intel_needs_workaround(device->isl_dev.info, 14019708328);
-   device->isl_dev.sampler_route_to_lsc =
-      driQueryOptionb(&instance->dri_options, "intel_sampler_route_to_lsc");
-   device->isl_dev.l1_storage_wt =
-      driQueryOptionb(&instance->dri_options, "intel_storage_cache_policy_wt");
+   device->isl_dev.sampler_route_to_lsc = instance->drirc.debug.sampler_route_to_lsc;
+   device->isl_dev.l1_storage_wt = instance->drirc.debug.storage_l1_wt;
    device->isl_dev.requires_padding = !device->has_scratch_page;
 
    result = anv_physical_device_init_uuids(device);
@@ -3087,6 +3211,13 @@ void anv_GetPhysicalDeviceQueueFamilyProperties2(
                   prop->optimalImageTransferToQueueFamilies = BITSET_MASK(pdevice->queue.family_count);
                else
                   prop->optimalImageTransferToQueueFamilies = 0;
+               break;
+            }
+
+            case VK_STRUCTURE_TYPE_QUEUE_FAMILY_OPTIMAL_IMAGE_TRANSFER_GRANULARITY_PROPERTIES_KHR: {
+               VkQueueFamilyOptimalImageTransferGranularityPropertiesKHR *prop =
+                  (VkQueueFamilyOptimalImageTransferGranularityPropertiesKHR *)ext;
+               prop->optimalImageTransferGranularity = (VkExtent3D){ 1, 1, 1, };
                break;
             }
 
@@ -3309,28 +3440,66 @@ VkResult anv_GetPhysicalDeviceFragmentShadingRatesKHR(
    return vk_outarray_status(&out);
 }
 
-static VkComponentTypeKHR
-convert_component_type(enum intel_cooperative_matrix_component_type t)
+static void
+anv_fill_all_cooperative_matrix_props(const struct anv_physical_device *pdevice, struct __vk_outarray *base,
+                                      void (*fill_cb)(struct __vk_outarray *base, unsigned exec_size,
+                                                      VkComponentTypeKHR a_type, VkComponentTypeKHR b_type,
+                                                      VkComponentTypeKHR c_type, VkComponentTypeKHR r_type,
+                                                      unsigned ops_per_chan, bool saturate))
 {
-   switch (t) {
-   case INTEL_CMAT_FLOAT16:  return VK_COMPONENT_TYPE_FLOAT16_KHR;
-   case INTEL_CMAT_FLOAT32:  return VK_COMPONENT_TYPE_FLOAT32_KHR;
-   case INTEL_CMAT_SINT32:   return VK_COMPONENT_TYPE_SINT32_KHR;
-   case INTEL_CMAT_SINT8:    return VK_COMPONENT_TYPE_SINT8_KHR;
-   case INTEL_CMAT_UINT32:   return VK_COMPONENT_TYPE_UINT32_KHR;
-   case INTEL_CMAT_UINT8:    return VK_COMPONENT_TYPE_UINT8_KHR;
-   case INTEL_CMAT_BFLOAT16: return VK_COMPONENT_TYPE_BFLOAT16_KHR;
+   const struct intel_device_info *devinfo = &pdevice->info;
+   if (!pdevice->has_cooperative_matrix)
+      return;
+
+   const bool emulated = debug_get_bool_option("INTEL_LOWER_DPAS", false);
+   const unsigned exec_size = devinfo->ver >= 20 ? 16 : 8;
+
+#define FILL(a_type, b_type, c_type, r_type, ops_per_chan, sat) \
+   fill_cb(base, exec_size,                                     \
+           VK_COMPONENT_TYPE_##a_type##_KHR,                    \
+           VK_COMPONENT_TYPE_##b_type##_KHR,                    \
+           VK_COMPONENT_TYPE_##c_type##_KHR,                    \
+           VK_COMPONENT_TYPE_##r_type##_KHR,                    \
+           ops_per_chan, sat)
+
+   /* Note: XeHP doesn't have this configuration. */
+   if (devinfo->ver >= 20 || emulated)
+      FILL(FLOAT16, FLOAT16, FLOAT16, FLOAT16, 2, false);
+
+   FILL(FLOAT16, FLOAT16, FLOAT32, FLOAT32, 2, false);
+
+   if (devinfo->has_bfloat16 && !emulated) {
+      if (devinfo->ver >= 20)
+         FILL(BFLOAT16, BFLOAT16, BFLOAT16, BFLOAT16, 2, false);
+      FILL(BFLOAT16, BFLOAT16, FLOAT32, FLOAT32, 2, false);
    }
-   UNREACHABLE("invalid cooperative matrix component type in configuration");
+
+   FILL(SINT8, SINT8, SINT32, SINT32, 4, false);
+   FILL(UINT8, UINT8, UINT32, UINT32, 4, false);
+
+#undef FILL
 }
 
-static VkScopeKHR
-convert_scope(enum intel_cmat_scope scope)
+static void
+anv_fill_cooperative_matrix_prop(struct __vk_outarray *base, unsigned exec_size,
+                                 VkComponentTypeKHR a_type, VkComponentTypeKHR b_type,
+                                 VkComponentTypeKHR c_type, VkComponentTypeKHR r_type,
+                                 unsigned ops_per_chan, bool saturate)
 {
-   switch (scope) {
-   case INTEL_CMAT_SCOPE_SUBGROUP: return VK_SCOPE_SUBGROUP_KHR;
-   default:
-      UNREACHABLE("invalid cooperative matrix scope in configuration");
+   vk_outarray(VkCooperativeMatrixPropertiesKHR) *out = (void *)base;
+
+   vk_outarray_append_typed(VkCooperativeMatrixPropertiesKHR, out, p)
+   {
+      *p = (struct VkCooperativeMatrixPropertiesKHR){.sType = VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR,
+                                                     .MSize = 8,
+                                                     .NSize = exec_size,
+                                                     .KSize = 8 * ops_per_chan,
+                                                     .AType = a_type,
+                                                     .BType = b_type,
+                                                     .CType = c_type,
+                                                     .ResultType = r_type,
+                                                     .saturatingAccumulation = saturate,
+                                                     .scope = VK_SCOPE_SUBGROUP_KHR};
    }
 }
 
@@ -3340,74 +3509,8 @@ VkResult anv_GetPhysicalDeviceCooperativeMatrixPropertiesKHR(
    VkCooperativeMatrixPropertiesKHR*           pProperties)
 {
    ANV_FROM_HANDLE(anv_physical_device, pdevice, physicalDevice);
-   const struct intel_device_info *devinfo = &pdevice->info;
-
    VK_OUTARRAY_MAKE_TYPED(VkCooperativeMatrixPropertiesKHR, out, pProperties, pPropertyCount);
-
-   if (!pdevice->has_cooperative_matrix)
-      return vk_outarray_status(&out);
-
-   for (int i = 0; i < ARRAY_SIZE(devinfo->cooperative_matrix_configurations); i++) {
-      const struct intel_cooperative_matrix_configuration *cfg =
-         &devinfo->cooperative_matrix_configurations[i];
-
-      if (cfg->scope == INTEL_CMAT_SCOPE_NONE)
-         break;
-
-      vk_outarray_append_typed(VkCooperativeMatrixPropertiesKHR, &out, prop) {
-         prop->sType = VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR;
-
-         prop->MSize = cfg->m;
-         prop->NSize = cfg->n;
-         prop->KSize = cfg->k;
-
-         prop->AType      = convert_component_type(cfg->a);
-         prop->BType      = convert_component_type(cfg->b);
-         prop->CType      = convert_component_type(cfg->c);
-         prop->ResultType = convert_component_type(cfg->result);
-
-         prop->saturatingAccumulation = VK_FALSE;
-         prop->scope = convert_scope(cfg->scope);
-      }
-
-      /* VUID-RuntimeSpirv-saturatingAccumulation-08983 says:
-       *
-       *    For OpCooperativeMatrixMulAddKHR, the SaturatingAccumulation
-       *    cooperative matrix operand must be present if and only if
-       *    VkCooperativeMatrixPropertiesKHR::saturatingAccumulation is
-       *    VK_TRUE.
-       *
-       * As a result, we have to advertise integer configs both with and
-       * without this flag set.
-       *
-       * The DPAS instruction does not support the .sat modifier, so only
-       * advertise the configurations when the DPAS would be lowered.
-       *
-       * FINISHME: It should be possible to do better than full lowering on
-       * platforms that support DPAS. Emit a DPAS with a NULL accumulator
-       * argument, then perform the correct sequence of saturating add
-       * instructions.
-       */
-      if (cfg->a != INTEL_CMAT_FLOAT16 &&
-          (devinfo->verx10 < 125 || debug_get_bool_option("INTEL_LOWER_DPAS", false))) {
-         vk_outarray_append_typed(VkCooperativeMatrixPropertiesKHR, &out, prop) {
-            prop->sType = VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR;
-
-            prop->MSize = cfg->m;
-            prop->NSize = cfg->n;
-            prop->KSize = cfg->k;
-
-            prop->AType      = convert_component_type(cfg->a);
-            prop->BType      = convert_component_type(cfg->b);
-            prop->CType      = convert_component_type(cfg->c);
-            prop->ResultType = convert_component_type(cfg->result);
-
-            prop->saturatingAccumulation = VK_TRUE;
-            prop->scope = convert_scope(cfg->scope);
-         }
-      }
-   }
-
+   anv_fill_all_cooperative_matrix_props(pdevice, &out.base, anv_fill_cooperative_matrix_prop);
    return vk_outarray_status(&out);
 }
 
@@ -3419,4 +3522,35 @@ VkResult anv_GetPhysicalDeviceCooperativeMatrixFlexibleDimensionsPropertiesNV(
    VK_OUTARRAY_MAKE_TYPED(VkCooperativeMatrixFlexibleDimensionsPropertiesNV, out, pProperties, pPropertyCount);
    /* TODO: When we enable flexible dimensions, fill this properly. */
    return vk_outarray_status(&out);
+}
+
+VkDeviceSize anv_GetPhysicalDeviceDescriptorSizeEXT(
+    VkPhysicalDevice                            physicalDevice,
+    VkDescriptorType                            descriptorType)
+{
+   switch (descriptorType) {
+   case VK_DESCRIPTOR_TYPE_SAMPLER:
+      return ANV_SAMPLER_STATE_SIZE;
+
+   case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+      return ANV_SURFACE_STATE_SIZE +
+             align(ANV_SAMPLER_STATE_SIZE, ANV_SURFACE_STATE_SIZE);
+
+   case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+   case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+   case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+   case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
+   case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+   case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+   case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+   case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+   case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+      return ANV_SURFACE_STATE_SIZE;
+
+   case VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR:
+      return sizeof(uint64_t);
+
+   default:
+      UNREACHABLE("invalid descriptor type");
+   }
 }

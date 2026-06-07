@@ -11,6 +11,7 @@
 #endif
 
 #include "compiler/shader_enums.h"
+#include "util/bitscan.h"
 #include "util/enum_operators.h"
 
 #ifdef __cplusplus
@@ -112,6 +113,9 @@ enum intel_fs_config {
 
    /** True if we need to apply Wa_18019110168 remapping */
    INTEL_FS_CONFIG_PER_PRIMITIVE_REMAPPING = (1 << 6),
+
+   /** True if conservative rasterization is enabled */
+   INTEL_FS_CONFIG_CONSERVATIVE_RASTER = (1 << 7),
 
    /** True if this shader has been dispatched coarse
     *
@@ -542,6 +546,7 @@ struct intel_fs_params {
    uint32_t first_vue_slot;
    uint32_t primitive_id_index;
    bool per_primitive_remapping;
+   bool conservative_raster;
 };
 
 static inline enum intel_fs_config
@@ -587,6 +592,9 @@ intel_fs_config(struct intel_fs_params params)
    if (params.per_primitive_remapping)
       fs_config |= INTEL_FS_CONFIG_PER_PRIMITIVE_REMAPPING;
 
+   if (params.conservative_raster)
+      fs_config |= INTEL_FS_CONFIG_CONSERVATIVE_RASTER;
+
    return fs_config;
 }
 
@@ -603,6 +611,7 @@ enum intel_shader_reloc_id {
    BRW_SHADER_RELOC_RESUME_SBT_ADDR_HIGH,
    BRW_SHADER_RELOC_DESCRIPTORS_ADDR_HIGH,
    BRW_SHADER_RELOC_DESCRIPTORS_BUFFER_ADDR_HIGH,
+   BRW_SHADER_RELOC_PUSH_DESCRIPTORS_BUFFER_ADDR_HIGH,
    BRW_SHADER_RELOC_DESCRIPTORS_VIEW_HANDLE,
    BRW_SHADER_RELOC_DESCRIPTORS_BUFFERS_VIEW_HANDLE,
    BRW_SHADER_RELOC_INSTRUCTION_BASE_ADDR_HIGH,

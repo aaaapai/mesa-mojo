@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include "amd_family.h"
+#include "ac_video.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -351,16 +352,7 @@ struct radeon_info {
    uint32_t vcn_enc_major_version;
    uint32_t vcn_enc_minor_version;
    uint32_t vcn_fw_revision;
-   struct video_caps_info {
-      struct video_codec_cap {
-         uint32_t valid;
-         uint32_t max_width;
-         uint32_t max_height;
-         uint32_t max_pixels_per_frame;
-         uint32_t max_level;
-         uint32_t pad;
-      } codec_info[8]; /* the number of available codecs */
-   } dec_caps, enc_caps;
+   struct ac_video_caps video_caps;
 
    enum vcn_version vcn_ip_version;
    enum sdma_version sdma_ip_version;
@@ -490,9 +482,18 @@ enum ac_query_gpu_info_result {
    AC_QUERY_GPU_INFO_UNIMPLEMENTED_HW,
 };
 
+/* If compiler_compat_mode is true, then ac_compiler_info must be identical between:
+ * - CHIP_VANGOGH and CHIP_REMBRANDT
+ * - CHIP_NAVI33, CHIP_PHOENIX and CHIP_PHOENIX2
+ * This is done by disabling features and enabling workarounds.
+ *
+ * conformant_trunc_coord is an exception, and might differ.
+ */
 enum ac_query_gpu_info_result ac_query_gpu_info(int fd, void *dev_p, struct radeon_info *info,
-                                                bool require_pci_bus_info);
-void ac_fill_compiler_info(struct radeon_info *info, const struct drm_amdgpu_info_device *device_info);
+                                                bool require_pci_bus_info,
+                                                bool compiler_compat_mode);
+void ac_fill_compiler_info(struct radeon_info *info,
+                           const struct drm_amdgpu_info_device *device_info, bool compat_mode);
 void ac_fill_tiling_info(struct radeon_info *info, const struct amdgpu_gpu_info *amdinfo);
 void ac_fill_memory_info(struct radeon_info *info, const struct drm_amdgpu_info_device *device_info,
                          const struct drm_amdgpu_memory_info *meminfo);

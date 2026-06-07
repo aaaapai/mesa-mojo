@@ -446,14 +446,12 @@ iris_blorp_exec_blitter(struct blorp_batch *blorp_batch,
    iris_bo_bump_seqno(params->dst.addr.buffer, batch->next_seqno,
                       IRIS_DOMAIN_OTHER_WRITE);
 
-   /*
-    * TDOD: Add INTEL_NEEDS_WA_14025112257 check once HSD is propogated for all
-    * other impacted platforms.
-    */
-   if (batch->screen->devinfo->ver >= 20 && batch->name == IRIS_BATCH_COMPUTE) {
+#if INTEL_NEEDS_WA_14025112257
+   if (batch->name == IRIS_BATCH_COMPUTE) {
       iris_emit_pipe_control_flush(batch, "WA_14025112257",
                                    PIPE_CONTROL_STATE_CACHE_INVALIDATE);
    }
+#endif
 }
 
 static void
@@ -535,4 +533,11 @@ blorp_emit_post_draw(struct blorp_batch *blorp_batch, const struct blorp_params 
    genX(emit_3dprimitive_was)(batch, NULL, MESA_PRIM_QUAD_STRIP, 3);
    genX(maybe_emit_breakpoint)(batch, false);
    blorp_measure_end(blorp_batch, params);
+}
+
+static bool *
+blorp_get_write_fencing_status(struct blorp_batch *blorp_batch)
+{
+   struct iris_batch *batch = blorp_batch->driver_batch;
+   return &batch->write_fence_status;
 }

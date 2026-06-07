@@ -177,10 +177,13 @@ update_instr_type(struct hash_table *types, nir_instr *instr, ti_type type)
          return true;
       case nir_intrinsic_read_first_invocation:
       case nir_intrinsic_read_invocation:
+      case nir_intrinsic_quad_vote_all:
+      case nir_intrinsic_quad_vote_any:
       case nir_intrinsic_quad_broadcast:
       case nir_intrinsic_quad_swap_horizontal:
       case nir_intrinsic_quad_swap_vertical:
       case nir_intrinsic_quad_swap_diagonal:
+      case nir_intrinsic_rotate:
       case nir_intrinsic_shuffle:
       case nir_intrinsic_shuffle_down:
       case nir_intrinsic_shuffle_up:
@@ -460,6 +463,7 @@ infer_types_from_intrinsic(struct hash_table *types, nir_intrinsic_instr *instr)
       break;
    case nir_intrinsic_read_invocation:
    case nir_intrinsic_quad_broadcast:
+   case nir_intrinsic_rotate:
    case nir_intrinsic_shuffle:
    case nir_intrinsic_shuffle_down:
    case nir_intrinsic_shuffle_up:
@@ -744,8 +748,10 @@ emit_src_component(struct nir_to_msl_ctx *ctx, nir_src *src, unsigned comp)
    switch (type) {
    case TYPE_FLOAT: {
       double v = nir_src_comp_as_float(*src, comp);
-      if (isinf(v)) {
+      if (v == INFINITY) {
          P(ctx, "(INFINITY");
+      } else if (v == -INFINITY) {
+         P(ctx, "(-INFINITY");
       } else if (isnan(v)) {
          P(ctx, "(NAN");
       } else {
@@ -790,6 +796,9 @@ emit_src_component(struct nir_to_msl_ctx *ctx, nir_src *src, unsigned comp)
    case TYPE_GENERIC_INT:
    case TYPE_GENERIC_INT_OR_BOOL:
       switch (src->ssa->bit_size) {
+      case 1:
+         P(ctx, "bool(");
+         break;
       case 8:
          P(ctx, "uchar(");
          break;
