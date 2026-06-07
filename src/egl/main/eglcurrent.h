@@ -71,14 +71,7 @@ _eglIsApiValid(EGLenum api)
     * OpenGL, since Zink could provide
     * support for full desktop GL.
     */
-   if (api == EGL_OPENGL_API)
-      return true;
-#endif
-#if HAVE_OPENGL_ES_1 || HAVE_OPENGL_ES_2
-   if (api == EGL_OPENGL_ES_API)
-      return true;
-#endif
-   return false;
+   return true;
 }
 
 extern _EGLThreadInfo *
