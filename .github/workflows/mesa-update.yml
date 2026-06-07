@@ -1,55 +1,39 @@
-# .github/workflows/check-upstream.yml
-name: Check Upstream Mesa and Create PR on Failure
+name: Auto PR from upstream Mesa
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:       # 支持手动触发
 
-# 关键权限配置，必须授予写入 pull-requests 的权限[reference:8]
 permissions:
   pull-requests: write
 
 jobs:
-  # 主任务：尝试同步上游代码
-  Sync:
+  create-pr:
     runs-on: ubuntu-slim
     steps:
-      - name: Checkout current repository
+      - name: Checkout your repository (Main branch)
         uses: actions/checkout@v4
+        with:
+          ref: Main          # 你的默认分支是 Main（大写M）
 
-      - name: Pull changes from upstream Mesa repository
+      - name: Fetch upstream Mesa (main branch)
         run: |
           git remote add upstream https://gitlab.freedesktop.org/mesa/mesa.git
-          git fetch upstream
-          git checkout -b upstream-sync
-          git merge upstream/main --allow-unrelated-histories -m "Merge upstream Mesa changes"
+          git fetch upstream main   # 上游默认分支是 main（小写m）
 
-      # 关键：推送合并后的更新到当前仓库
-      - name: Push updates to repository
-        run: git push origin upstream-sync
+      - name: Create/update upstream-sync branch with upstream/main
+        run: |
+          git checkout -B upstream-sync upstream/main
+          git push -f origin upstream-sync
 
-  # 条件任务：仅当 Sync job 失败时创建 PR[reference:9]
-  Create-PR-on-Failure:
-    needs: [Sync]
-    if: failure()
-    runs-on: ubuntu-slim
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          ref: upstream-sync
-
-      # 使用 peter-evans/create-pull-request action 创建 PR
-      - name: Create Pull Request
-        id: cpr
+      - name: Create Pull Request towards Main
         uses: peter-evans/create-pull-request@v6
         with:
-          token: ${{ secrets.GH_PAT }} # 推荐使用 Personal Access Token (classic) 以兼容私有仓库
-          commit-message: "chore: sync from upstream Mesa (failed)"
-          title: "⚠️ [AUTO] Failed to sync from upstream Mesa"
-          body: |
-            The automated sync job from [Mesa upstream](https://gitlab.freedesktop.org/mesa) has failed.
-            
-            Please investigate the cause of the failure and resolve it manually.
+          token: ${{ secrets.GITHUB_TOKEN }}
           branch: upstream-sync
-          base: main
-          delete-branch: true # PR 合并后删除源分支
+          base: Main          # 目标分支是你的 Main
+          title: "⬆️ Auto PR: sync from upstream Mesa (main)"
+          body: |
+            自动从 [Mesa 上游](https://gitlab.freedesktop.org/mesa/mesa) 的 `main` 分支同步到本仓库的 `upstream-sync` 分支。
+
+            ⚠️ 请手动审查合并，如有冲突请在本机解决后合并。
+          delete-branch: false   # 保留分支，以便下次更新覆盖
