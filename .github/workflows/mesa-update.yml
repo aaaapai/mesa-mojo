@@ -1,8 +1,6 @@
 name: Sync upstream Mesa branch
 
 on:
-  schedule:
-    - cron: '0 2 * * *'   # 每天 UTC 2 点运行
   workflow_dispatch:
 
 permissions:
