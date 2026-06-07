@@ -72,6 +72,8 @@
 		glXGetProcAddress;
                 glXGetProcAddressARB;
                 gl*;
+				zink*;
+				st*;
 		dri3*;
 		loader_dri3*;
 		dri_create_drawable;
