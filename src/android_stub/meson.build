@@ -1,7 +1,7 @@
 if with_android_stub
   stub_libs = []
 
-  foreach lib : ['hardware', 'backtrace', 'cutils', 'nativewindow', 'sync', 'log']
+  foreach lib : ['hardware', 'backtrace', 'nativewindow', 'sync', 'log']
     stub_libs += static_library(
       lib,
       files(lib + '_stub.cpp'),
