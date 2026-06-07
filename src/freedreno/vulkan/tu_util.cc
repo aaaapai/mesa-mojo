@@ -31,8 +31,10 @@ tu_sgsr_mode_name(enum tu_sgsr_mode mode)
       return "auto";
    case TU_SGSR_MODE_FORCE:
       return "force";
+   default:
+      return "auto";
    }
-   unreachable("invalid SGSR mode");
+   
 }
 
 static const char *
