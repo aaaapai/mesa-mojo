@@ -218,6 +218,10 @@ tu_spirv_to_nir(struct tu_device *dev,
    nir->info.num_ubos = 0;
    nir->info.num_ssbos = 0;
 
+   if (TU_DEBUG(COMPUTE_ROUND_ROBIN)) {
+      nir->info.occupancy_bounded_workgroup_fairness = true;
+   }
+
    if (TU_DEBUG(NIR)) {
       fprintf(stderr, "translated nir:\n");
       nir_print_shader(nir, stderr);
@@ -1750,6 +1754,7 @@ tu6_emit_xs(struct tu_crb &crb,
                                 .fullregfootprint = xs->info.max_reg + 1,
                                 .branchstack = ir3_shader_branchstack_hw(xs),
                                 .threadsize = thrsz,
+                                .computerrmodeen = xs->cs.round_robin_mode,
                                 .earlypreamble = xs->early_preamble,
                                 .mergedregs = xs->mergedregs, ));
       crb.add(A6XX_SP_CS_INSTR_SIZE(xs->instrlen));

@@ -105,6 +105,7 @@ v3dv_EnumerateInstanceVersion(uint32_t *pApiVersion)
     defined(VK_USE_PLATFORM_XLIB_KHR) ||    \
     defined(VK_USE_PLATFORM_DISPLAY_KHR)
 #define V3DV_USE_WSI_PLATFORM
+#include "wsi_common.h"
 #endif
 
 static const struct vk_instance_extension_table instance_extensions = {
@@ -188,6 +189,7 @@ get_device_extensions(const struct v3dv_physical_device *device,
       .KHR_pipeline_executable_properties   = true,
       .KHR_separate_depth_stencil_layouts   = true,
       .KHR_shader_expect_assume             = true,
+      .KHR_shader_float16_int8              = device->devinfo.ver >= 71,
       .KHR_shader_float_controls            = true,
       .KHR_shader_non_semantic_info         = true,
       .KHR_shader_relaxed_extended_instruction = true,
@@ -260,6 +262,9 @@ get_device_extensions(const struct v3dv_physical_device *device,
       .EXT_texel_buffer_alignment           = true,
       .EXT_tooling_info                     = true,
       .EXT_vertex_attribute_divisor         = true,
+#ifdef V3DV_USE_WSI_PLATFORM
+      .GOOGLE_display_timing = wsi_instance_supports_google_display_timing(device->vk.instance),
+#endif
    };
 #if DETECT_OS_ANDROID
    struct u_gralloc *gralloc = vk_android_get_ugralloc();
@@ -320,9 +325,10 @@ get_features(const struct v3dv_physical_device *physical_device,
       .shaderStorageImageArrayDynamicIndexing = false,
       .shaderClipDistance = true,
       .shaderCullDistance = false,
+      .shaderFloat16 = physical_device->devinfo.ver >= 71,
       .shaderFloat64 = false,
       .shaderInt64 = false,
-      .shaderInt16 = false,
+      .shaderInt16 = physical_device->devinfo.ver >= 71,
       .shaderResourceResidency = false,
       .shaderResourceMinLod = false,
       .sparseBinding = false,
@@ -382,6 +388,7 @@ get_features(const struct v3dv_physical_device *physical_device,
       .separateDepthStencilLayouts = true,
       .storageBuffer8BitAccess = true,
       .storagePushConstant8 = true,
+      .shaderInt8 = physical_device->devinfo.ver >= 71,
       .imagelessFramebuffer = true,
       .timelineSemaphore = true,
 
@@ -768,20 +775,23 @@ v3dv_DestroyInstance(VkInstance _instance,
 static uint64_t
 compute_heap_size(struct v3dv_instance *instance)
 {
-   const uint64_t MAX_HEAP_SIZE = 4ull * 1024ull * 1024ull * 1024ull;
+   /* The GPU has a 32-bit MMU and cannot address more than 4GB. */
+   ASSERTED const uint64_t MAX_HEAP_SIZE = 4ull * 1024ull * 1024ull * 1024ull;
    uint64_t memory;
-
 #if !USE_V3D_SIMULATOR
    memory = os_get_gpu_heap_size(instance->heap_memory_percent,
                                  &instance->heap_memory_percent);
-#else
-   uint64_t total_ram = (uint64_t) v3d_simulator_get_mem_size();
-   memory = os_gpu_heap_size_calculate(total_ram,
-                                       instance->heap_memory_percent,
-                                       &instance->heap_memory_percent);
-#endif
-
    return MIN2(MAX_HEAP_SIZE, memory);
+#else
+   /* Memory allocated by the simulator is fully dedicated for the GPU so we
+    * expose all of it instead of reserving a fraction for the rest of the
+    * system as we do for real, shared RAM. The simulator never allocates more
+    * than the GPU can address.
+    */
+   memory = (uint64_t) v3d_simulator_get_mem_size();
+   assert(MAX_HEAP_SIZE >= memory);
+   return memory;
+#endif
 }
 
 static uint64_t
@@ -790,17 +800,19 @@ compute_memory_budget(struct v3dv_physical_device *device)
    uint64_t heap_size = device->memory.memoryHeaps[0].size;
    uint64_t heap_used = p_atomic_read(&device->heap_used);
 
+#if !USE_V3D_SIMULATOR
    /* Let's not incite the app to starve the system: report at most 90% of
     * available system memory.
     */
    const float percentage = 0.9f;
-
-#if !USE_V3D_SIMULATOR
    return vk_physical_device_heap_budget_from_system(
          &device->vk, percentage, heap_size, heap_used);
 #else
-   return vk_physical_device_heap_budget(v3d_simulator_get_mem_free(),
-         percentage, heap_size, heap_used);
+   /* The simulator memory is fully dedicated to the GPU, so the whole free
+    * pool is available to applications.
+    */
+   uint64_t heap_available = (uint64_t) v3d_simulator_get_mem_free();
+   return MIN2(heap_size, heap_used + heap_available);
 #endif
 }
 

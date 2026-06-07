@@ -36,8 +36,21 @@ struct kk_root_descriptor_table {
          uint32_t buffer_strides[KK_MAX_VBUFS];
          uint64_t attrib_base[KK_MAX_ATTRIBS];
          uint32_t attrib_clamps[KK_MAX_ATTRIBS];
+
+         /* Mask of outputs flowing VS->TCS, VS->GS, or TES->GS . */
+         uint64_t vertex_outputs;
+
+         /* Address of vertex param buffer if geom/tess is used, else 0 */
+         uint64_t vertex_params;
+
+         /* Address of tessellation param buffer if tessellation used, else 0 */
+         uint64_t tess_params;
+
          float blend_constant[4];
          float clip_z_coeff;
+         uint32_t index_size;
+         uint64_t base_vertex_addr;
+         uint64_t base_instance_addr;
       } draw;
       struct {
          uint32_t base_group[3];
@@ -69,9 +82,6 @@ struct kk_descriptor_state {
 };
 
 struct kk_per_draw_data {
-   /* Mask of stages that need per-draw data uploaded */
-   uint32_t upload_mask;
-
    uint32_t draw_id;
 };
 
@@ -148,6 +158,16 @@ struct kk_graphics_state {
       struct kk_addr_range addr_range[KK_MAX_VBUFS];
       mtl_buffer *handles[KK_MAX_VBUFS];
    } vb;
+
+   /* Tessellation state */
+   struct {
+      /* Grid buffer for when the draw is indirect */
+      struct kk_ptr indirect_ptr;
+      mtl_buffer *out_draws_buffer;
+      uint64_t out_draws_offset;
+      struct kk_tess_info info;
+      enum mesa_prim prim;
+   } tess;
 
    /* Needed by vk_command_buffer::dynamic_graphics_state */
    struct vk_vertex_input_state _dynamic_vi;
@@ -317,6 +337,12 @@ kk_grid_indirect(mtl_buffer *indirect, uint32_t offset)
       .indirect = indirect,
       .offset = offset,
    };
+}
+
+static bool
+kk_grid_is_indirect(struct kk_grid grid)
+{
+   return grid.mode == KK_GRID_INDIRECT;
 }
 
 void kk_dispatch_precomp(struct kk_cmd_buffer *cmd, struct kk_grid grid,

@@ -11,6 +11,7 @@
 
 #include "drm-uapi/drm_fourcc.h"
 #include "git_sha1.h"
+#include "perfcntrs/freedreno_perfcntr.h"
 
 #include "common/freedreno_stompable_regs.h"
 /* for fd_get_driver/device_uuid() */
@@ -48,11 +49,33 @@
 #include "git_sha1.h"
 #include "tu_version.h"
 
+#ifdef TU_WSI_PLATFORM
+#include "wsi_common.h"
+#endif
+
 #if DETECT_OS_ANDROID
 #include <vndk/hardware_buffer.h>
 #endif
 
 uint64_t os_page_size = 4096;
+
+static bool
+tu_device_get_build_id(blake3_hasher *ctx)
+{
+#ifdef TU_BUILD_ID_OVERRIDE
+   {
+      assert(strlen(TU_BUILD_ID_OVERRIDE) % 2 == 0);
+      unsigned size = strlen(TU_BUILD_ID_OVERRIDE) / 2;
+      auto data = static_cast<unsigned char *>(ralloc_size(NULL, size));
+      mesa_hex_to_bytes(data, TU_BUILD_ID_OVERRIDE, size);
+      _mesa_blake3_update(ctx, data, size);
+      ralloc_free(data);
+      return true;
+   }
+#else
+   return disk_cache_get_function_identifier((void *) tu_device_get_build_id, ctx);
+#endif
+}
 
 static int
 tu_device_get_cache_uuid(struct tu_physical_device *device, void *uuid)
@@ -64,16 +87,21 @@ tu_device_get_cache_uuid(struct tu_physical_device *device, void *uuid)
     * shader hash instead, since the compiler is only created with the logical
     * device.
     */
-   uint64_t driver_flags = TU_DEBUG(NOMULTIPOS);
-   uint16_t family = fd_dev_gpu_id(&device->dev_id);
+   uint64_t driver_flags = TU_DEBUG(NOMULTIPOS) |
+      (TU_DEBUG(COMPUTE_ROUND_ROBIN) << 1u);
+
+   /* Note: we intentionally drop the upper 32 bits since they contain fuse
+    * values that don't affect compilation.
+    */
+   uint32_t chip_id = device->dev_id.chip_id;
 
    memset(uuid, 0, VK_UUID_SIZE);
    _mesa_blake3_init(&ctx);
 
-   if (!disk_cache_get_function_identifier((void *)tu_device_get_cache_uuid, &ctx))
+   if (!tu_device_get_build_id(&ctx))
       return -1;
 
-   _mesa_blake3_update(&ctx, &family, sizeof(family));
+   _mesa_blake3_update(&ctx, &chip_id, sizeof(chip_id));
    _mesa_blake3_update(&ctx, &driver_flags, sizeof(driver_flags));
    _mesa_blake3_update(&ctx, &device->uche_trap_base, sizeof(device->uche_trap_base));
    _mesa_blake3_final(&ctx, blake3);
@@ -365,6 +393,9 @@ get_device_extensions(const struct tu_physical_device *device,
       .ANDROID_native_buffer = has_gralloc,
       .ARM_rasterization_order_attachment_access = true,
       .GOOGLE_decorate_string = true,
+#ifdef TU_USE_WSI_PLATFORM
+      .GOOGLE_display_timing = wsi_instance_supports_google_display_timing(&device->instance->vk),
+#endif
       .GOOGLE_hlsl_functionality1 = true,
       .GOOGLE_user_type = true,
       .IMG_filter_cubic = device->info->props.has_tex_filter_cubic,
@@ -3091,6 +3122,10 @@ tu_CreateDevice(VkPhysicalDevice physicalDevice,
       }
    }
 
+   device->perfcntrs = fd_perfcntr_state_alloc(
+      &physical_device->dev_id,
+      is_kgsl(physical_device->instance) ? -1 : device->fd);
+
    device->autotune = new tu_autotune(device, result);
    if (result != VK_SUCCESS)
       goto fail_autotune;
@@ -3191,6 +3226,7 @@ tu_CreateDevice(VkPhysicalDevice physicalDevice,
 fail_timeline_cond:
 fail_a725_workaround:
 fail_autotune:
+   fd_perfcntr_state_free(device->perfcntrs);
    delete device->autotune;
 fail_bin_preamble:
 fail_prepare_perfcntrs_pass_cs:
@@ -3296,6 +3332,8 @@ tu_DestroyDevice(VkDevice _device, const VkAllocationCallbacks *pAllocator)
    }
 
    delete device->autotune;
+
+   fd_perfcntr_state_free(device->perfcntrs);
 
    tu_bo_suballocator_finish(&device->pipeline_suballoc);
    tu_bo_suballocator_finish(&device->kgsl_profiling_suballoc);

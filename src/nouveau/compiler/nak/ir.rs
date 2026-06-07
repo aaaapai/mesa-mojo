@@ -9109,20 +9109,9 @@ pub struct BasicBlock {
 }
 
 impl BasicBlock {
-    pub fn map_instrs(&mut self, mut map: impl FnMut(Instr) -> MappedInstrs) {
-        let mut instrs = Vec::new();
-        for i in self.instrs.drain(..) {
-            match map(i) {
-                MappedInstrs::None => (),
-                MappedInstrs::One(i) => {
-                    instrs.push(i);
-                }
-                MappedInstrs::Many(mut v) => {
-                    instrs.append(&mut v);
-                }
-            }
-        }
-        self.instrs = instrs;
+    pub fn map_instrs(&mut self, map: impl FnMut(Instr) -> MappedInstrs) {
+        let instrs = std::mem::take(&mut self.instrs);
+        self.instrs = instrs.into_iter().flat_map(map).collect();
     }
 
     pub fn phi_dsts_ip(&self) -> Option<usize> {
@@ -9989,9 +9978,9 @@ impl Shader<'_> {
     pub fn remove_annotations(&mut self) {
         self.map_instrs(|instr: Instr, _| -> MappedInstrs {
             if matches!(instr.op, Op::Annotate(_)) {
-                MappedInstrs::None
+                [].into()
             } else {
-                MappedInstrs::One(instr)
+                [instr].into()
             }
         })
     }
