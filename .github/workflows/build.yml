@@ -70,7 +70,7 @@ jobs:
             -Degl-native-platform=android \
             -Dgbm=disabled \
             -Dopengl=true \
-            -Dvulkan-drivers=turnip \
+            -Dvulkan-drivers=freedreno \
             -Dtools= \
             -Dgallium-drivers=zink \
             -Dcpp_rtti=true \
