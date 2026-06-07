@@ -1,42 +1,34 @@
-name: Auto PR from upstream Mesa
+name: Sync upstream Mesa branch
 
 on:
-  schedule:
-    - cron: '0 2 * * *'
-  workflow_dispatch:
+  workflow_dispatch:       # 支持手动触发
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: write          # 只需要写入代码的权限
 
 jobs:
-  create-pr:
+  sync:
     runs-on: ubuntu-slim
     steps:
-      - name: Checkout your repository (Main branch)
+      - name: Checkout your repository
         uses: actions/checkout@v4
         with:
-          ref: Main
+          # 这里不需要默认分支，因为我们会独立创建/更新分支
+          fetch-depth: 0     # 获取所有历史以便后续推送
 
       - name: Fetch upstream Mesa (main branch)
         run: |
           git remote add upstream https://gitlab.freedesktop.org/mesa/mesa.git
           git fetch upstream main
 
-      - name: Create/update upstream-sync branch with upstream/main
+      - name: Create/force-update branch 'upstream-mesa' from upstream/main
         run: |
-          git checkout -B upstream-sync upstream/main
-          git push -f origin upstream-sync
+          # 直接基于上游 main 创建/重置本地分支 upstream-mesa
+          git checkout -B upstream-mesa upstream/main
+          # 强制推送到 origin，覆盖远程同名分支
+          git push origin upstream-mesa --force
 
-      - name: Create Pull Request towards Main
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          branch: upstream-sync
-          base: Main
-          title: "⬆️ Auto PR: sync from upstream Mesa (main)"
-          body: |
-            自动从 [Mesa 上游](https://gitlab.freedesktop.org/mesa/mesa) 的 `main` 分支同步到本仓库的 `upstream-sync` 分支。
-
-            ⚠️ 请手动审查合并，如有冲突请在本机解决后合并。
-          delete-branch: false
+      - name: (Optional) Log commit hash for verification
+        run: |
+          echo "Updated upstream-mesa to commit:"
+          git rev-parse upstream-mesa
