@@ -17,6 +17,7 @@ typedef void (*AHardwareBuffer_release_t)(AHardwareBuffer*);
 typedef void (*AHardwareBuffer_describe_t)(const AHardwareBuffer*, AHardwareBuffer_Desc*);
 typedef int (*AHardwareBuffer_allocate_t)(const AHardwareBuffer_Desc*, AHardwareBuffer**);
 typedef const native_handle_t* (*AHardwareBuffer_getNativeHandle_t)(const AHardwareBuffer*);
+typedef int (*AHardwareBuffer_isSupported_t)(const AHardwareBuffer_Desc*);  // 新增
 typedef void (*ANativeWindow_acquire_t)(ANativeWindow*);
 typedef void (*ANativeWindow_release_t)(ANativeWindow*);
 typedef int32_t (*ANativeWindow_getFormat_t)(ANativeWindow*);
@@ -37,6 +38,7 @@ static AHardwareBuffer_release_t fp_AHardwareBuffer_release = nullptr;
 static AHardwareBuffer_describe_t fp_AHardwareBuffer_describe = nullptr;
 static AHardwareBuffer_allocate_t fp_AHardwareBuffer_allocate = nullptr;
 static AHardwareBuffer_getNativeHandle_t fp_AHardwareBuffer_getNativeHandle = nullptr;
+static AHardwareBuffer_isSupported_t fp_AHardwareBuffer_isSupported = nullptr;  // 新增
 static ANativeWindow_acquire_t fp_ANativeWindow_acquire = nullptr;
 static ANativeWindow_release_t fp_ANativeWindow_release = nullptr;
 static ANativeWindow_getFormat_t fp_ANativeWindow_getFormat = nullptr;
@@ -108,6 +110,8 @@ static void initNativeWindowWrapperImpl() {
         dlsym(sNativeWindowHandle, "AHardwareBuffer_allocate"));
     fp_AHardwareBuffer_getNativeHandle = reinterpret_cast<AHardwareBuffer_getNativeHandle_t>(
         dlsym(sNativeWindowHandle, "AHardwareBuffer_getNativeHandle"));
+    fp_AHardwareBuffer_isSupported = reinterpret_cast<AHardwareBuffer_isSupported_t>(  // 新增
+        dlsym(sNativeWindowHandle, "AHardwareBuffer_isSupported"));
     fp_ANativeWindow_acquire = reinterpret_cast<ANativeWindow_acquire_t>(
         dlsym(sNativeWindowHandle, "ANativeWindow_acquire"));
     fp_ANativeWindow_release = reinterpret_cast<ANativeWindow_release_t>(
@@ -173,107 +177,108 @@ static T getFunctionPointer(T* funcPtr, const char* funcName) {
     } \
     ALOGW("%s: no implementation available", #func);
 
+#define SAFE_CALL_RET(func, default_val, ...) \
+    ensureInitialized(); \
+    if (fp_##func) { \
+        return fp_##func(__VA_ARGS__); \
+    } \
+    ALOGW("%s: no implementation available, returning default", #func); \
+    return default_val;
+
 extern "C" {
 
 AHardwareBuffer* ANativeWindowBuffer_getHardwareBuffer(ANativeWindowBuffer* anwb) {
-    //printf("ANativeWindowBuffer_getHardwareBuffer called with anwb=%p\n", anwb);
     SAFE_CALL(ANativeWindowBuffer_getHardwareBuffer, anwb);
     return nullptr;
 }
 
 void AHardwareBuffer_acquire(AHardwareBuffer* buffer) {
-    //printf("AHardwareBuffer_acquire called with buffer=%p\n", buffer);
     SAFE_CALL_VOID(AHardwareBuffer_acquire, buffer);
 }
 
 void AHardwareBuffer_release(AHardwareBuffer* buffer) {
-    //printf("AHardwareBuffer_release called with buffer=%p\n", buffer);
     SAFE_CALL_VOID(AHardwareBuffer_release, buffer);
 }
 
 void AHardwareBuffer_describe(const AHardwareBuffer* buffer, AHardwareBuffer_Desc* outDesc) {
-    //printf("AHardwareBuffer_describe called with buffer=%p, outDesc=%p\n", buffer, outDesc);
     SAFE_CALL_VOID(AHardwareBuffer_describe, buffer, outDesc);
 }
 
 int AHardwareBuffer_allocate(const AHardwareBuffer_Desc* desc, AHardwareBuffer** outBuffer) {
-    //printf("AHardwareBuffer_allocate called with desc=%p, outBuffer=%p\n", desc, outBuffer);
     SAFE_CALL(AHardwareBuffer_allocate, desc, outBuffer);
     return 0;
 }
 
 const native_handle_t* AHardwareBuffer_getNativeHandle(const AHardwareBuffer* buffer) {
-    //printf("AHardwareBuffer_getNativeHandle called with buffer=%p\n", buffer);
     SAFE_CALL(AHardwareBuffer_getNativeHandle, buffer);
     return nullptr;
 }
 
+// 新增 AHardwareBuffer_isSupported 包装函数
+int AHardwareBuffer_isSupported(const AHardwareBuffer_Desc* desc) {
+    // 使用 SAFE_CALL_RET 宏，如果函数指针为空则返回 -ENOENT
+    ensureInitialized();
+    if (fp_AHardwareBuffer_isSupported) {
+        return fp_AHardwareBuffer_isSupported(desc);
+    }
+    ALOGW("AHardwareBuffer_isSupported: no implementation available");
+    return -ENOENT;  // 表示函数不存在或库未加载
+}
+
 void ANativeWindow_acquire(ANativeWindow* window) {
-    //printf("ANativeWindow_acquire called with window=%p\n", window);
     SAFE_CALL_VOID(ANativeWindow_acquire, window);
 }
 
 void ANativeWindow_release(ANativeWindow* window) {
-    //printf("ANativeWindow_release called with window=%p\n", window);
     SAFE_CALL_VOID(ANativeWindow_release, window);
 }
 
 int32_t ANativeWindow_getFormat(ANativeWindow* window) {
-    //printf("ANativeWindow_getFormat called with window=%p\n", window);
     SAFE_CALL(ANativeWindow_getFormat, window);
     return 0;
 }
 
 int ANativeWindow_setSwapInterval(ANativeWindow* window, int interval) {
-    //printf("ANativeWindow_setSwapInterval called with window=%p, interval=%d\n", window, interval);
     SAFE_CALL(ANativeWindow_setSwapInterval, window, interval);
     return 0;
 }
 
 int ANativeWindow_query(const ANativeWindow* window, ANativeWindowQuery query, int* value) {
-    //printf("ANativeWindow_query called with window=%p, query=%d, value=%p\n", window, query, value);
     SAFE_CALL(ANativeWindow_query, window, query, value);
     return 0;
 }
 
 int ANativeWindow_dequeueBuffer(ANativeWindow* window, ANativeWindowBuffer** buffer, int* fenceFd) {
-    //printf("ANativeWindow_dequeueBuffer called with window=%p, buffer=%p, fenceFd=%p\n", window, buffer, fenceFd);
     SAFE_CALL(ANativeWindow_dequeueBuffer, window, buffer, fenceFd);
     return 0;
 }
 
 int ANativeWindow_queueBuffer(ANativeWindow* window, ANativeWindowBuffer* buffer, int fenceFd) {
-    //printf("ANativeWindow_queueBuffer called with window=%p, buffer=%p, fenceFd=%d\n", window, buffer, fenceFd);
     SAFE_CALL(ANativeWindow_queueBuffer, window, buffer, fenceFd);
     return 0;
 }
 
 int ANativeWindow_cancelBuffer(ANativeWindow* window, ANativeWindowBuffer* buffer, int fenceFd) {
-    //printf("ANativeWindow_cancelBuffer called with window=%p, buffer=%p, fenceFd=%d\n", window, buffer, fenceFd);
     SAFE_CALL(ANativeWindow_cancelBuffer, window, buffer, fenceFd);
     return 0;
 }
 
 int ANativeWindow_setUsage(ANativeWindow* window, uint64_t usage) {
-    //printf("ANativeWindow_setUsage called with window=%p, usage=%llu\n", window, (unsigned long long)usage);
     SAFE_CALL(ANativeWindow_setUsage, window, usage);
     return 0;
 }
 
 int ANativeWindow_setSharedBufferMode(ANativeWindow* window, bool sharedBufferMode) {
-    //printf("ANativeWindow_setSharedBufferMode called with window=%p, sharedBufferMode=%d\n", window, sharedBufferMode);
     SAFE_CALL(ANativeWindow_setSharedBufferMode, window, sharedBufferMode);
     return 0;
 }
 
 int32_t ANativeWindow_getWidth(ANativeWindow* window) {
-    //printf("ANativeWindow_getWidth called with window=%p\n", window);
     SAFE_CALL(ANativeWindow_getWidth, window);
     return 0;
 }
 
 int32_t ANativeWindow_getHeight(ANativeWindow* window) {
-    //printf("ANativeWindow_getHeight called with window=%p\n", window);
     SAFE_CALL(ANativeWindow_getHeight, window);
     return 0;
 }
