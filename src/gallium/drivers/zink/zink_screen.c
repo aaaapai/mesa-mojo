@@ -3377,20 +3377,20 @@ static void* vulkan_load_from_pojavexec(void)
     // 优先使用环境变量 VULKAN_PTR
     const char* vulkan_ptr_env = getenv("VULKAN_PTR");
     if (vulkan_ptr_env) {
-        mesa_loge("[MESA] Use VULKAN_PTR = %s\n", vulkan_ptr_env);
+        printf("[MESA] Use VULKAN_PTR = %s\n", vulkan_ptr_env);
         return (void*)strtoul(vulkan_ptr_env, NULL, 16);
     }
 
-    mesa_loge("[MESA] Try to dlopen libpojavexec.\n");
+    printf("[MESA] Try to dlopen libpojavexec.\n");
     void* lib_handle = dlopen("libpojavexec.so", RTLD_NOLOAD);
     if (lib_handle == NULL) {
-        mesa_loge("[MESA] Failed to dlopen libpojavexec, now try again.");
+        printf("[MESA] Failed to dlopen libpojavexec, now try again.");
         lib_handle = dlopen("libpojavexec.so", RTLD_GLOBAL | RTLD_LAZY);
         if (lib_handle == NULL) {
-            mesa_loge("[MESA] Failed to dlopen libpojavexec. Now try to dlopen libpgw.");
+            printf("[MESA] Failed to dlopen libpojavexec. Now try to dlopen libpgw.");
             lib_handle = dlopen("libpgw.so", RTLD_NOLOAD);
             if (lib_handle == NULL) {
-                mesa_loge("[MESA] Failed to dlopen libpgw. Now try again.");
+                printf("[MESA] Failed to dlopen libpgw. Now try again.");
                 lib_handle = dlopen("libpgw.so", RTLD_GLOBAL | RTLD_LAZY);
             }
         }
