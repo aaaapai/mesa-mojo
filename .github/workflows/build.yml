@@ -1,7 +1,7 @@
 name: Build Android
 
 on:
-  [push, workflow_dispatch]
+  [workflow_dispatch]
 
 jobs:
   build:
@@ -70,7 +70,7 @@ jobs:
             -Degl-native-platform=android \
             -Dgbm=disabled \
             -Dopengl=true \
-            -Dvulkan-drivers= \
+            -Dvulkan-drivers=turnip \
             -Dtools= \
             -Dgallium-drivers=zink \
             -Dcpp_rtti=true \
@@ -81,7 +81,7 @@ jobs:
             -Dvalgrind=disabled \
             -Dgallium-rusticl=false \
             -Dgallium-va=false \
-            -Dshared-glapi=disabled
+            -Dshared-glapi=enabled
           meson compile -C "build-android" -j 6 || (echo "=== Mesa build failed, printing meson-log ===" && cat build-android/meson-logs/meson-log.txt && exit 1)
           meson install -C "build-android"
       - name: Upload libraries
