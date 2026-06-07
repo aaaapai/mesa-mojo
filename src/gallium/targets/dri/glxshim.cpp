@@ -21,10 +21,10 @@ struct context_t {
             return;
         }
         printf("GLXShim: Loading egl...\n");
-        dl_handle = dlopen(eglName, RTLD_NOLOAD);
+        dl_handle = dlopen("libEGL_mesa.so", RTLD_NOLOAD);
         if (dl_handle == nullptr) {
           printf("GLXShim: Failed to load EGL. Try again now.\n");
-          dl_handle = dlopen(eglName, RTLD_LOCAL|RTLD_LAZY);
+          dl_handle = dlopen("libEGL_mesa.so", RTLD_LOCAL|RTLD_LAZY);
         }
         eglGetProcAddress =
                 (eglGetProcAddress_ptr_t)dlsym(dl_handle, "eglGetProcAddress");
