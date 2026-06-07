@@ -1,10 +1,13 @@
 name: Sync upstream Mesa branch
 
 on:
-  workflow_dispatch:       # 支持手动触发
+  schedule:
+    - cron: '0 2 * * *'   # 每天 UTC 2 点运行
+  workflow_dispatch:
 
 permissions:
-  contents: write          # 只需要写入代码的权限
+  contents: write      # 允许推送代码
+  workflows: write     # 允许更新 .github/workflows 下的文件
 
 jobs:
   sync:
@@ -13,8 +16,7 @@ jobs:
       - name: Checkout your repository
         uses: actions/checkout@v4
         with:
-          # 这里不需要默认分支，因为我们会独立创建/更新分支
-          fetch-depth: 0     # 获取所有历史以便后续推送
+          fetch-depth: 0
 
       - name: Fetch upstream Mesa (main branch)
         run: |
@@ -23,12 +25,10 @@ jobs:
 
       - name: Create/force-update branch 'upstream-mesa' from upstream/main
         run: |
-          # 直接基于上游 main 创建/重置本地分支 upstream-mesa
           git checkout -B upstream-mesa upstream/main
-          # 强制推送到 origin，覆盖远程同名分支
           git push origin upstream-mesa --force
 
-      - name: (Optional) Log commit hash for verification
+      - name: Log commit hash
         run: |
           echo "Updated upstream-mesa to commit:"
           git rev-parse upstream-mesa
