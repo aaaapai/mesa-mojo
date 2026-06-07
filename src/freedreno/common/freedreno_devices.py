@@ -879,7 +879,7 @@ a730_raw_magic_regs = [
         [A6XXRegs.REG_A7XX_UCHE_UNKNOWN_0E11, 0x00000040],
         [A6XXRegs.REG_A7XX_SP_HLSQ_DBG_ECO_CNTL, 0x00008000],
         [A6XXRegs.REG_A6XX_SP_DBG_ECO_CNTL, 0x10000000],
-        [A6XXRegs.REG_A6XX_PC_MODE_CNTL,    0x1f1f],
+        [A6XXRegs.REG_A6XX_PC_MODE_CNTL,    0x00001f1f],  # old value - 0x0000003f
         [A6XXRegs.REG_A6XX_PC_DBG_ECO_CNTL, 0x20080000],
         [A6XXRegs.REG_A7XX_PC_UNKNOWN_9E24, 0x21fc7f00],
         [A6XXRegs.REG_A7XX_VFD_DBG_ECO_CNTL, 0x00000000],
@@ -1459,6 +1459,42 @@ add_gpus([
         tile_max_h = 16384,
         num_vsc_pipes = 32,
         cs_shared_mem_size = 64 * 1024,
+        wave_granularity = 2,
+        fibers_per_sp = 128 * 2 * 16,
+        magic_regs = dict(),
+        raw_magic_regs = a8xx_base_raw_magic_regs,
+    ))
+
+# gen8_6_0
+add_gpus([
+        GPUId(chip_id=0x44030000, name="Adreno (TM) 825"),
+    ], A6xxGPUInfo(
+        CHIP.A8XX,
+        [a7xx_base, a7xx_gen3, a8xx_base, a8xx_gen1, GPUProps(
+            gmem_ccu_color_cache_fraction = CCUColorCacheFraction.HALF.value,
+            gmem_per_ccu_color_cache_size = 128 * 1024,
+            gmem_ccu_depth_cache_fraction = CCUColorCacheFraction.HALF.value,
+            gmem_per_ccu_depth_cache_size = 128 * 1024,
+            # This is probably not an optimal config for gmem/sysmem, but it was working before and I don't have any a825 device to test (neither I have any trace info)
+            sysmem_ccu_color_cache_fraction = CCUColorCacheFraction.FULL.value,
+            sysmem_per_ccu_color_cache_size = 128 * 1024,
+            sysmem_ccu_depth_cache_fraction = CCUColorCacheFraction.THREE_QUARTER.value,
+            sysmem_per_ccu_depth_cache_size = 96 * 1024,
+            gmem_vpc_attr_buf_size = 65536, 
+            gmem_vpc_pos_buf_size = 32768,
+            gmem_vpc_bv_pos_buf_size = 32768,
+            disable_gmem = False,
+            gmem_size = 2 * 1024 * 1024,
+            shading_rate_matches_vk = True,
+        )],
+        num_ccu = 4,
+        num_slices = 2,
+        tile_align_w = 64,
+        tile_align_h = 32,
+        tile_max_w = 16416,
+        tile_max_h = 16384,
+        num_vsc_pipes = 32,
+        cs_shared_mem_size = 32 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
         magic_regs = dict(),
