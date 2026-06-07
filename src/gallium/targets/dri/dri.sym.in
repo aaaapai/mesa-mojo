@@ -70,8 +70,8 @@
 		dri_get_pipe_screen;
 		dri_get_drm_device_info;
 		glXGetProcAddress;
-        glXGetProcAddressARB;
-        gl*;
+                glXGetProcAddressARB;
+                gl*;
 		dri3*;
 		loader_dri3*;
 		dri_create_drawable;
