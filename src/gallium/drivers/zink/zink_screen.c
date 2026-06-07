@@ -3385,13 +3385,13 @@ static void* vulkan_load_from_pojavexec(void)
     void* lib_handle = dlopen("libpojavexec.so", RTLD_NOLOAD);
     if (lib_handle == NULL) {
         printf("[MESA] Failed to dlopen libpojavexec, now try again.");
-        lib_handle = dlopen("libpojavexec.so", RTLD_GLOBAL | RTLD_LAZY);
+        lib_handle = dlopen("libpojavexec.so", RTLD_LOCAL | RTLD_LAZY);
         if (lib_handle == NULL) {
             printf("[MESA] Failed to dlopen libpojavexec. Now try to dlopen libpgw.");
             lib_handle = dlopen("libpgw.so", RTLD_NOLOAD);
             if (lib_handle == NULL) {
                 printf("[MESA] Failed to dlopen libpgw. Now try again.");
-                lib_handle = dlopen("libpgw.so", RTLD_GLOBAL | RTLD_LAZY);
+                lib_handle = dlopen("libpgw.so", RTLD_LOCAL | RTLD_LAZY);
             }
         }
     }
@@ -3441,13 +3441,9 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
 
    screen->loader_lib = vulkan_load_from_pojavexec();
 
-   if (!screen->loader_lib) {
-      screen->loader_lib = util_dl_open(VK_LIBNAME);
-   }
-
     if (!screen->loader_lib) {
         if (!screen->driver_name_is_inferred)
-         mesa_loge("ZINK: failed to load Vulkan loader (tried pojavexec and " VK_LIBNAME ")");
+         printf("ZINK: failed to load Vulkan loader (tried pojavexec and " VK_LIBNAME ")\n");
         goto fail;
    }
 
