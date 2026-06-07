@@ -50,7 +50,7 @@ tu_sgsr_quality_name(enum tu_sgsr_quality quality)
    case TU_SGSR_QUALITY_ULTRA:
       return "ultra";
    }
-   unreachable("invalid SGSR quality");
+   UNREACHABLE("invalid SGSR quality");
 }
 
 static enum tu_sgsr_mode
