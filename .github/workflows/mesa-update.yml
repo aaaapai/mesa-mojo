@@ -1,34 +1,40 @@
 name: Sync upstream Mesa (without .github folder)
 
 on:
+  schedule:
+    - cron: '0 2 * * *'
   workflow_dispatch:
 
 permissions:
-  contents: write          # 只需要写入代码的权限，不需要 workflows 权限
+  contents: write
 
 jobs:
   sync:
     runs-on: ubuntu-slim
     steps:
-      - name: Checkout your repository (just to have git)
+      - name: Checkout your repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Configure Git user
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
 
       - name: Fetch upstream Mesa (main branch)
         run: |
           git remote add upstream https://gitlab.freedesktop.org/mesa/mesa.git
           git fetch upstream main
 
-      - name: Create branch from upstream/main and remove .github folder
+      - name: Create branch from upstream/main and remove .github
         run: |
-          # 基于上游 main 创建一个新分支（或重置已有分支）
           git checkout -B upstream-sync upstream/main
-          # 删除 .github 目录（如果存在）
-          rm -rf .github
-          # 提交这个删除操作
-          git commit -am "chore: remove .github directory to avoid workflows permission issue" || echo "No changes to commit"
-          # 强制推送
+          # 删除 .github 目录（如果存在），并自动 stage 这个删除操作
+          git rm -rf --ignore-unmatch .github
+          # 提交删除（如果没有变化，此命令会失败，但没关系）
+          git commit -m "chore: remove .github directory to avoid workflows permission issue" || echo "No .github directory to remove"
+          # 强制推送到你的仓库
           git push origin upstream-sync --force
 
       - name: Log commit hash
