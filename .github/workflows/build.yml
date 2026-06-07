@@ -24,7 +24,7 @@ jobs:
         run: |
           pip3 install meson
           sudo apt update
-          sudo apt install -y libxrandr-dev libxxf86vm-dev libxcb-*-dev libx11-xcb-dev libxfixes-dev libx11-dev
+          sudo apt install -y libxrandr-dev libxxf86vm-dev libxcb-*-dev libx11-xcb-dev libxfixes-dev libx11-dev glslang-tools
           cp -R /usr/include/X11 include/
           cp -R /usr/include/xcb include/
           
@@ -71,9 +71,9 @@ jobs:
             -Degl-native-platform=android \
             -Dgbm=disabled \
             -Dopengl=true \
-            -Dvulkan-drivers=freedreno \
+            -Dvulkan-drivers= \
             -Dtools= \
-            -Dgallium-drivers=zink,freedreno \
+            -Dgallium-drivers=zink \
             -Dcpp_rtti=false \
             -Degl-lib-suffix=_mesa \
             -Dshared-glapi=disabled
