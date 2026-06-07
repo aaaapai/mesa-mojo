@@ -75,10 +75,10 @@ static void initNativeWindowWrapperImpl() {
     
     for (int i = 0; libPaths[i] != nullptr; i++) {
         // 先尝试NOLOAD查看是否已加载
-        void* handle = dlopen(libPaths[i], RTLD_NOLOAD | RTLD_GLOBAL);
+        void* handle = dlopen(libPaths[i], RTLD_NOLOAD | RTLD_LOCAL);
         if (!handle) {
             // 未加载，尝试加载
-            handle = dlopen(libPaths[i], RTLD_LAZY | RTLD_GLOBAL);
+            handle = dlopen(libPaths[i], RTLD_LAZY | RTLD_LOCAL);
         }
         
         if (handle) {
