@@ -10,6 +10,31 @@
 #define ALOGW(...) do { printf("W/%s: ", LOG_TAG); printf(__VA_ARGS__); printf("\n"); } while(0)
 #define ALOGI(...) do { printf("I/%s: ", LOG_TAG); printf(__VA_ARGS__); printf("\n"); } while(0)
 
+// ================== 声明 libpojavexec.so 中的函数 ==================
+typedef bool (*ns_load_t)(const char* lib_search_path);
+typedef void* (*ns_dlopen_t)(const char* name, int flag);
+
+static ns_load_t linker_ns_load = nullptr;
+static ns_dlopen_t linker_ns_dlopen = nullptr;
+
+// 尝试加载 libpojavexec.so 并获取函数指针
+static bool initNamespaceBypass() {
+    void* handle = dlopen("libpojavexec.so", RTLD_LAZY);
+    if (!handle) {
+        ALOGW("Failed to dlopen libpojavexec.so: %s", dlerror());
+        return false;
+    }
+    linker_ns_load = (ns_load_t)dlsym(handle, "linker_ns_load");
+    linker_ns_dlopen = (ns_dlopen_t)dlsym(handle, "linker_ns_dlopen");
+    if (!linker_ns_load || !linker_ns_dlopen) {
+        ALOGW("Failed to get symbols from libpojavexec.so");
+        dlclose(handle);
+        return false;
+    }
+    // 注意：这里不关闭 handle，因为后续还要调用里面的函数
+    return true;
+}
+
 // 函数指针类型定义
 typedef AHardwareBuffer* (*ANativeWindowBuffer_getHardwareBuffer_t)(ANativeWindowBuffer*);
 typedef void (*AHardwareBuffer_acquire_t)(AHardwareBuffer*);
@@ -17,7 +42,7 @@ typedef void (*AHardwareBuffer_release_t)(AHardwareBuffer*);
 typedef void (*AHardwareBuffer_describe_t)(const AHardwareBuffer*, AHardwareBuffer_Desc*);
 typedef int (*AHardwareBuffer_allocate_t)(const AHardwareBuffer_Desc*, AHardwareBuffer**);
 typedef const native_handle_t* (*AHardwareBuffer_getNativeHandle_t)(const AHardwareBuffer*);
-typedef int (*AHardwareBuffer_isSupported_t)(const AHardwareBuffer_Desc*);  // 新增
+typedef int (*AHardwareBuffer_isSupported_t)(const AHardwareBuffer_Desc*);
 typedef void (*ANativeWindow_acquire_t)(ANativeWindow*);
 typedef void (*ANativeWindow_release_t)(ANativeWindow*);
 typedef int32_t (*ANativeWindow_getFormat_t)(ANativeWindow*);
@@ -38,7 +63,7 @@ static AHardwareBuffer_release_t fp_AHardwareBuffer_release = nullptr;
 static AHardwareBuffer_describe_t fp_AHardwareBuffer_describe = nullptr;
 static AHardwareBuffer_allocate_t fp_AHardwareBuffer_allocate = nullptr;
 static AHardwareBuffer_getNativeHandle_t fp_AHardwareBuffer_getNativeHandle = nullptr;
-static AHardwareBuffer_isSupported_t fp_AHardwareBuffer_isSupported = nullptr;  // 新增
+static AHardwareBuffer_isSupported_t fp_AHardwareBuffer_isSupported = nullptr;
 static ANativeWindow_acquire_t fp_ANativeWindow_acquire = nullptr;
 static ANativeWindow_release_t fp_ANativeWindow_release = nullptr;
 static ANativeWindow_getFormat_t fp_ANativeWindow_getFormat = nullptr;
@@ -61,43 +86,62 @@ static std::atomic<bool> sLibraryLoaded{false};
 // 内部初始化函数
 static void initNativeWindowWrapperImpl() {
     std::lock_guard<std::mutex> lock(sLibraryMutex);
-    
-    // 如果已经加载成功，直接返回
-    if (sLibraryLoaded) {
+    if (sLibraryLoaded) return;
+
+    // 1️⃣ 优先使用命名空间绕过方式加载 libnativewindow.so
+    bool loaded_bypass = false;
+    if (initNamespaceBypass()) {
+        // 根据架构选择搜索路径
+        const char* searchPath = nullptr;
+#if defined(__aarch64__)
+        searchPath = "/system/lib64";
+#else
+        searchPath = "/system/lib";
+#endif
+        if (linker_ns_load(searchPath)) {
+            ALOGI("Namespace created, loading libnativewindow.so via bypass");
+            sNativeWindowHandle = linker_ns_dlopen("libnativewindow.so", RTLD_LAZY | RTLD_LOCAL);
+            if (sNativeWindowHandle) {
+                ALOGI("Successfully loaded libnativewindow.so via namespace bypass");
+                loaded_bypass = true;
+            } else {
+                ALOGW("linker_ns_dlopen failed for libnativewindow.so");
+            }
+        } else {
+            ALOGW("linker_ns_load failed");
+        }
+    }
+
+    // 2️⃣ 回退方案：普通 dlopen
+    if (!loaded_bypass) {
+        const char* libPaths[] = {
+            "/system/lib64/libnativewindow.so",
+            "/system/lib/libnativewindow.so",
+            "libnativewindow.so",
+            nullptr
+        };
+        for (int i = 0; libPaths[i] != nullptr; i++) {
+            void* handle = dlopen(libPaths[i], RTLD_NOLOAD | RTLD_LOCAL);
+            if (!handle) {
+                handle = dlopen(libPaths[i], RTLD_LAZY | RTLD_LOCAL);
+            }
+            if (handle) {
+                sNativeWindowHandle = handle;
+                ALOGI("Successfully loaded %s (fallback)", libPaths[i]);
+                loaded_bypass = true;
+                break;
+            }
+            ALOGW("Failed to load %s: %s", libPaths[i], dlerror());
+        }
+    }
+
+    if (!loaded_bypass || sNativeWindowHandle == nullptr) {
+        ALOGE("All attempts to load libnativewindow.so failed, using stub implementations");
+        sLibraryLoaded = true;
         return;
     }
-    
-    // 尝试加载库文件
-    const char* libPaths[] = {
-        "/system/lib64/libnativewindow.so",
-        "/system/lib/libnativewindow.so",
-        "libnativewindow.so",
-        nullptr
-    };
-    
-    for (int i = 0; libPaths[i] != nullptr; i++) {
-        // 先尝试NOLOAD查看是否已加载
-        void* handle = dlopen(libPaths[i], RTLD_NOLOAD | RTLD_LOCAL);
-        if (!handle) {
-            // 未加载，尝试加载
-            handle = dlopen(libPaths[i], RTLD_LAZY | RTLD_LOCAL);
-        }
-        
-        if (handle) {
-            sNativeWindowHandle = handle;
-            ALOGI("Successfully loaded %s", libPaths[i]);
-            break;
-        }
-        ALOGW("Failed to load %s: %s", libPaths[i], dlerror());
-    }
-    
-    if (sNativeWindowHandle == nullptr) {
-        ALOGE("All library paths failed, using stub implementations");
-        sLibraryLoaded = true; // 标记为已处理，避免重复尝试
-        return;
-    }
-    
-    // 解析函数符号
+
+    // 解析函数符号（与原来相同）
     fp_ANativeWindowBuffer_getHardwareBuffer = reinterpret_cast<ANativeWindowBuffer_getHardwareBuffer_t>(
         dlsym(sNativeWindowHandle, "ANativeWindowBuffer_getHardwareBuffer"));
     fp_AHardwareBuffer_acquire = reinterpret_cast<AHardwareBuffer_acquire_t>(
@@ -110,7 +154,7 @@ static void initNativeWindowWrapperImpl() {
         dlsym(sNativeWindowHandle, "AHardwareBuffer_allocate"));
     fp_AHardwareBuffer_getNativeHandle = reinterpret_cast<AHardwareBuffer_getNativeHandle_t>(
         dlsym(sNativeWindowHandle, "AHardwareBuffer_getNativeHandle"));
-    fp_AHardwareBuffer_isSupported = reinterpret_cast<AHardwareBuffer_isSupported_t>(  // 新增
+    fp_AHardwareBuffer_isSupported = reinterpret_cast<AHardwareBuffer_isSupported_t>(
         dlsym(sNativeWindowHandle, "AHardwareBuffer_isSupported"));
     fp_ANativeWindow_acquire = reinterpret_cast<ANativeWindow_acquire_t>(
         dlsym(sNativeWindowHandle, "ANativeWindow_acquire"));
@@ -136,13 +180,12 @@ static void initNativeWindowWrapperImpl() {
         dlsym(sNativeWindowHandle, "ANativeWindow_getWidth"));
     fp_ANativeWindow_getHeight = reinterpret_cast<ANativeWindow_getHeight_t>(
         dlsym(sNativeWindowHandle, "ANativeWindow_getHeight"));
-    
-    // 检查关键函数是否解析成功
+
     if (!fp_ANativeWindowBuffer_getHardwareBuffer || !fp_AHardwareBuffer_acquire ||
         !fp_AHardwareBuffer_release || !fp_ANativeWindow_acquire || !fp_ANativeWindow_release) {
         ALOGW("Some critical functions failed to resolve, library may be incomplete");
     }
-    
+
     sLibraryLoaded = true;
 }
 
@@ -151,7 +194,7 @@ static inline void ensureInitialized() {
     std::call_once(sInitFlag, initNativeWindowWrapperImpl);
 }
 
-// 内部函数：安全地获取函数指针
+// 内部函数：安全地获取函数指针（模板，用于调试）
 template<typename T>
 static T getFunctionPointer(T* funcPtr, const char* funcName) {
     ensureInitialized();
@@ -214,15 +257,13 @@ const native_handle_t* AHardwareBuffer_getNativeHandle(const AHardwareBuffer* bu
     return nullptr;
 }
 
-// 新增 AHardwareBuffer_isSupported 包装函数
 int AHardwareBuffer_isSupported(const AHardwareBuffer_Desc* desc) {
-    // 使用 SAFE_CALL_RET 宏，如果函数指针为空则返回 -ENOENT
     ensureInitialized();
     if (fp_AHardwareBuffer_isSupported) {
         return fp_AHardwareBuffer_isSupported(desc);
     }
     ALOGW("AHardwareBuffer_isSupported: no implementation available");
-    return -ENOENT;  // 表示函数不存在或库未加载
+    return -ENOENT;
 }
 
 void ANativeWindow_acquire(ANativeWindow* window) {
