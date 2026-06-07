@@ -1,17 +1,16 @@
-name: Sync upstream Mesa branch
+name: Sync upstream Mesa (without .github folder)
 
 on:
   workflow_dispatch:
 
 permissions:
-  contents: write      # 允许推送代码
-  workflows: write     # 允许更新 .github/workflows 下的文件
+  contents: write          # 只需要写入代码的权限，不需要 workflows 权限
 
 jobs:
   sync:
     runs-on: ubuntu-slim
     steps:
-      - name: Checkout your repository
+      - name: Checkout your repository (just to have git)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -21,12 +20,18 @@ jobs:
           git remote add upstream https://gitlab.freedesktop.org/mesa/mesa.git
           git fetch upstream main
 
-      - name: Create/force-update branch 'upstream-mesa' from upstream/main
+      - name: Create branch from upstream/main and remove .github folder
         run: |
-          git checkout -B upstream-mesa upstream/main
-          git push origin upstream-mesa --force
+          # 基于上游 main 创建一个新分支（或重置已有分支）
+          git checkout -B upstream-sync upstream/main
+          # 删除 .github 目录（如果存在）
+          rm -rf .github
+          # 提交这个删除操作
+          git commit -am "chore: remove .github directory to avoid workflows permission issue" || echo "No changes to commit"
+          # 强制推送
+          git push origin upstream-sync --force
 
       - name: Log commit hash
         run: |
-          echo "Updated upstream-mesa to commit:"
-          git rev-parse upstream-mesa
+          echo "Updated upstream-sync to commit (without .github):"
+          git rev-parse upstream-sync
