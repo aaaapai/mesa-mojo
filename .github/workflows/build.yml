@@ -3,7 +3,6 @@ name: Build Android
 on:
   [push, workflow_dispatch]
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   build:
     strategy:
@@ -48,7 +47,8 @@ jobs:
             -Dvc4=disabled \
             -Detnaviv=disabled \
            -Dfreedreno-kgsl=false
-          meson compile -C "build-android" -j 6
+          # 调试：增加 -v 并输出详细日志
+          meson compile -C "build-android" -v -j 6 || { echo "=== DRM build failed, dumping meson-log ==="; cat build-android/meson-logs/meson-log.txt; exit 1; }
           meson install -C "build-android"
 
           cd ..
@@ -78,7 +78,8 @@ jobs:
             -Dcpp_rtti=false \
             -Degl-lib-suffix=_mesa \
             -Dshared-glapi=disabled
-          meson compile -C "build-android" -j 6
+          # 调试：增加 -v 并输出详细日志
+          meson compile -C "build-android" -v -j 6 || { echo "=== Mesa build failed, dumping meson-log ==="; cat build-android/meson-logs/meson-log.txt; exit 1; }
           meson install -C "build-android"
       - name: Upload libraries
         uses: actions/upload-artifact@main
