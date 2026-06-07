@@ -55,7 +55,6 @@ jobs:
           envsubst < android-cross >build-crossfile
           meson setup "build-android" \
             --prefix=/tmp/build \
-            --wrap-mode=nofallback \
             -Dforce_fallback_for=llvm \
             -Dgles1=disabled \
             -Dgles2=disabled \
@@ -74,8 +73,14 @@ jobs:
             -Dvulkan-drivers= \
             -Dtools= \
             -Dgallium-drivers=zink \
-            -Dcpp_rtti=false \
+            -Dcpp_rtti=true \
             -Degl-lib-suffix=_mesa \
+            -Dglvnd=disabled \
+            -Dglx=disabled \
+            -Dvideo-codecs= \
+            -Dvalgrind=disabled \
+            -Dgallium-rusticl=false \
+            -Dgallium-va=false \
             -Dshared-glapi=disabled
           meson compile -C "build-android" -j 6 || (echo "=== Mesa build failed, printing meson-log ===" && cat build-android/meson-logs/meson-log.txt && exit 1)
           meson install -C "build-android"
