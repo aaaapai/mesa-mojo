@@ -66,7 +66,6 @@ struct _egl_thread_info {
 static inline EGLBoolean
 _eglIsApiValid(EGLenum api)
 {
-#if HAVE_OPENGL
    /* Do not guard against Android from
     * OpenGL, since Zink could provide
     * support for full desktop GL.
