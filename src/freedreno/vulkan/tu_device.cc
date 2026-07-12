@@ -104,6 +104,12 @@ tu_device_get_cache_uuid(struct tu_physical_device *device, void *uuid)
    _mesa_blake3_update(&ctx, &chip_id, sizeof(chip_id));
    _mesa_blake3_update(&ctx, &driver_flags, sizeof(driver_flags));
    _mesa_blake3_update(&ctx, &device->uche_trap_base, sizeof(device->uche_trap_base));
+   _mesa_blake3_update(&ctx, &device->instance->drirc.misc.allow_oob_indirect_ubo_loads,
+                       sizeof(device->instance->drirc.misc.allow_oob_indirect_ubo_loads));
+   _mesa_blake3_update(&ctx, &device->enable_texel_buffer_emulation,
+                       sizeof(device->enable_texel_buffer_emulation));
+   _mesa_blake3_update(&ctx, &device->enable_ssbo_emulation,
+                       sizeof(device->enable_ssbo_emulation));
    _mesa_blake3_final(&ctx, blake3);
 
    memcpy(uuid, blake3, VK_UUID_SIZE);
@@ -394,7 +400,7 @@ get_device_extensions(const struct tu_physical_device *device,
       .ARM_rasterization_order_attachment_access = true,
       .GOOGLE_decorate_string = true,
 #ifdef TU_USE_WSI_PLATFORM
-      .GOOGLE_display_timing = wsi_instance_supports_google_display_timing(&device->instance->vk),
+      .GOOGLE_display_timing = wsi_instance_supports_google_display_timing(&device->instance->vk, &device->instance->drirc.options),
 #endif
       .GOOGLE_hlsl_functionality1 = true,
       .GOOGLE_user_type = true,
@@ -1156,9 +1162,14 @@ tu_get_properties(struct tu_physical_device *pdevice,
    props->maxImageDimension3D = (1 << 11);
    props->maxImageDimensionCube = (1 << 14);
    props->maxImageArrayLayers = (1 << (pdevice->info->props.is_a702 ? 8 : 11));
-   props->maxTexelBufferElements = MAX_TEXEL_ELEMENTS;
+   props->maxTexelBufferElements = pdevice->enable_texel_buffer_emulation
+                                      ? TU_D3D12_MAX_TEXEL_BUFFER_ELEMENTS
+                                      : pdevice->info->props.max_texel_buffer_range_elements;
    props->maxUniformBufferRange = MAX_UNIFORM_BUFFER_RANGE;
-   props->maxStorageBufferRange = MAX_STORAGE_BUFFER_RANGE;
+   props->maxStorageBufferRange =
+      pdevice->enable_ssbo_emulation
+         ? TU_D3D12_MAX_STORAGE_BUFFER_RANGE_BYTES
+         : pdevice->info->props.max_storage_buffer_range_bytes;
    props->maxPushConstantsSize = MAX_PUSH_CONSTANTS_SIZE;
    props->maxMemoryAllocationCount = UINT32_MAX;
    props->maxSamplerAllocationCount = 64 * 1024;
@@ -1321,10 +1332,9 @@ tu_get_properties(struct tu_physical_device *pdevice,
    props->sparseResidencyAlignedMipSize = false;
    props->sparseResidencyNonResidentStrict = true;
 
-   char devname[128];
-   strcpy(devname, pdevice->name);
-   strcat(devname, " (" TUGEN8_DRV_VERSION ")");
-   strcpy(props->deviceName, devname);
+   snprintf(props->deviceName, sizeof(props->deviceName), "%s",
+            (strlen(pdevice->instance->drirc.debug.force_vk_devicename) > 0) ?
+            pdevice->instance->drirc.debug.force_vk_devicename : pdevice->name);
    memcpy(props->pipelineCacheUUID, pdevice->cache_uuid, VK_UUID_SIZE);
 
    if (TU_DEBUG(DECK_EMU)) {
@@ -1470,7 +1480,7 @@ tu_get_properties(struct tu_physical_device *pdevice,
    props->bufferCaptureReplayDescriptorDataSize = sizeof(uint64_t);
    props->imageCaptureReplayDescriptorDataSize = sizeof(uint64_t);
    props->imageViewCaptureReplayDescriptorDataSize = 0;
-   props->samplerCaptureReplayDescriptorDataSize = 0;
+   props->samplerCaptureReplayDescriptorDataSize = sizeof(uint32_t);
    props->accelerationStructureCaptureReplayDescriptorDataSize = 0;
    /* Note: these sizes must match descriptor_size() */
    props->EDBsamplerDescriptorSize = FDL6_TEX_CONST_DWORDS * 4;
@@ -1754,7 +1764,17 @@ tu_physical_device_init(struct tu_physical_device *device,
       goto fail_free_name;
    }
 
-   tu_sgsr_config_init(device);
+   /* D3D12 texel buffer range emulation requires the resbase instruction, which appeared in 7xx. */
+   if (fd_dev_gen(&device->dev_id) >= 7) {
+      if (device->info->props.max_texel_buffer_range_elements < TU_D3D12_MAX_TEXEL_BUFFER_ELEMENTS) {
+         assert(fd_dev_gen(&device->dev_id) == 7);
+         device->enable_texel_buffer_emulation = instance->drirc.misc.enable_texel_buffer_emulation;
+      }
+      if (device->info->props.max_storage_buffer_range_bytes < TU_D3D12_MAX_STORAGE_BUFFER_RANGE_BYTES) {
+         assert(fd_dev_gen(&device->dev_id) == 7);
+         device->enable_ssbo_emulation = instance->drirc.misc.enable_ssbo_emulation;
+      }
+   }
 
    if (tu_device_get_cache_uuid(device, device->cache_uuid)) {
       result = vk_startup_errorf(instance, VK_ERROR_INITIALIZATION_FAILED,
@@ -1854,6 +1874,17 @@ tu_physical_device_init(struct tu_physical_device *device,
             .type = TU_QUEUE_SPARSE,
             .properties = &tu_sparse_queue_family_properties,
          };
+   }
+
+   device->emulate_second_queue = -1;
+   if (instance->drirc.misc.emulate_second_queue) {
+      for (unsigned i = 0; i < device->num_queue_families; i++) {
+         if (device->queue_families[i].properties->queueFlags &
+             VK_QUEUE_GRAPHICS_BIT) {
+            device->emulate_second_queue = i;
+            break;
+         }
+      }
    }
 
 #ifdef TU_USE_WSI_PLATFORM
@@ -2064,6 +2095,9 @@ tu_GetPhysicalDeviceQueueFamilyProperties2(
 
       vk_outarray_append_typed(VkQueueFamilyProperties2, &out, p) {
          p->queueFamilyProperties = *family->properties;
+
+         if (pdevice->emulate_second_queue == (int) i)
+            p->queueFamilyProperties.queueCount = 2;
 
          vk_foreach_struct(ext, p->pNext) {
             switch (ext->sType) {
@@ -2943,8 +2977,15 @@ tu_CreateDevice(VkPhysicalDevice physicalDevice,
       device->queue_count[qfi] = queue_create->queueCount;
 
       for (unsigned q = 0; q < queue_create->queueCount; q++) {
+         /* For the emulated second queue, share the first queue's kernel
+          * submitqueue rather than creating a new one.
+          */
+         bool emulated = (q > 0 &&
+                          (int) qfi == physical_device->emulate_second_queue);
+
          result = tu_queue_init(device, &device->queues[qfi][q], type,
-                                global_priority, q, queue_create);
+                                global_priority, q, queue_create,
+                                emulated ? &device->queues[qfi][0] : NULL);
          if (result != VK_SUCCESS) {
             device->queue_count[qfi] = q;
             goto fail_queues;
@@ -3262,7 +3303,7 @@ fail_compiler:
    vk_meta_device_finish(&device->vk, &device->meta);
 fail_queues:
    for (unsigned i = 0; i < TU_MAX_QUEUE_FAMILIES; i++) {
-      for (unsigned q = 0; q < device->queue_count[i]; q++)
+      for (int q = device->queue_count[i] - 1; q >= 0; q--)
          tu_queue_finish(&device->queues[i][q]);
       if (device->queues[i])
          vk_free(&device->vk.alloc, device->queues[i]);
@@ -3371,7 +3412,7 @@ tu_DestroyDevice(VkDevice _device, const VkAllocationCallbacks *pAllocator)
       tu_destroy_memory(device, device->msrtss_depth_temporary);
 
    for (unsigned i = 0; i < TU_MAX_QUEUE_FAMILIES; i++) {
-      for (unsigned q = 0; q < device->queue_count[i]; q++)
+      for (int q = device->queue_count[i] - 1; q >= 0; q--)
          tu_queue_finish(&device->queues[i][q]);
       if (device->queue_count[i])
          vk_free(&device->vk.alloc, device->queues[i]);

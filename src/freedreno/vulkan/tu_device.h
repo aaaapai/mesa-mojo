@@ -154,6 +154,9 @@ struct tu_physical_device
    /* Whether performance counter selector registers can be written by userspace CSes. */
    bool is_perf_cntr_selectable;
 
+   bool enable_texel_buffer_emulation;
+   bool enable_ssbo_emulation;
+
    struct {
       uint32_t non_lazy_type_count;
       uint32_t type_count;
@@ -162,6 +165,9 @@ struct tu_physical_device
 
    struct tu_queue_family queue_families[TU_MAX_QUEUE_FAMILIES];
    unsigned num_queue_families;
+
+   /** Queue family index with an emulated second queue, or -1 if none */
+   int emulate_second_queue;
 
    struct fd_dev_id dev_id;
    struct fd_dev_info dev_info;

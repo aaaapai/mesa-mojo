@@ -31,6 +31,9 @@
 #include "vk_common_entrypoints.h"
 #include "vk_pipeline_cache.h"
 #include "vk_util.h"
+#ifndef _WIN32
+#include "winsys/amdgpu/radv_amdgpu_winsys_public.h"
+#endif
 #include "util/mesa-blake3.h"
 #include "util/u_atomic.h"
 #include "util/u_process.h"
@@ -263,7 +266,7 @@ radv_device_init_vrs_state(struct radv_device *device)
       .arrayLayers = 1,
       .samples = VK_SAMPLE_COUNT_1_BIT,
       .tiling = VK_IMAGE_TILING_OPTIMAL,
-      .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+      .usage = VK_IMAGE_USAGE_2_DEPTH_STENCIL_ATTACHMENT_BIT_KHR,
       .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
       .queueFamilyIndexCount = 0,
       .pQueueFamilyIndices = NULL,
@@ -660,6 +663,36 @@ radv_device_finish_device_fault_detection(struct radv_device *device)
 }
 
 static VkResult
+radv_shader_abort_data_init(struct radv_device *device)
+{
+   struct radv_shader_abort_data *shader_abort = &device->shader_abort;
+
+   shader_abort->buffer_size = sizeof(uint32_t) + sizeof(uint64_t) + RADV_MAX_SHADER_ABORT_MESSAGE_SIZE;
+
+   VkResult result =
+      radv_backed_buffer_init(device, &shader_abort->buffer, shader_abort->buffer_size, radv_memory_type_visible_vram,
+                              VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_2_SHADER_DEVICE_ADDRESS_BIT, true);
+   if (result != VK_SUCCESS)
+      return result;
+
+   shader_abort->buffer_addr = radv_backed_buffer_get_va(device, &shader_abort->buffer);
+
+   /* Initialize the offset to write in the buffer header. */
+   uint32_t *data = shader_abort->buffer.map;
+   data[0] = sizeof(uint32_t);
+
+   return VK_SUCCESS;
+}
+
+static void
+radv_shader_abort_data_finish(struct radv_device *device)
+{
+   struct radv_shader_abort_data *shader_abort = &device->shader_abort;
+
+   radv_backed_buffer_finish(device, &shader_abort->buffer);
+}
+
+static VkResult
 radv_device_init_tools(struct radv_device *device)
 {
    const struct radv_physical_device *pdev = radv_device_physical(device);
@@ -696,12 +729,19 @@ radv_device_init_tools(struct radv_device *device)
    if (result != VK_SUCCESS)
       return result;
 
+   if (device->vk.enabled_features.shaderAbort) {
+      result = radv_shader_abort_data_init(device);
+      if (result != VK_SUCCESS)
+         return result;
+   }
+
    return VK_SUCCESS;
 }
 
 static void
 radv_device_finish_tools(struct radv_device *device)
 {
+   radv_shader_abort_data_finish(device);
    radv_printf_data_finish(device);
    radv_rra_trace_finish(radv_device_to_handle(device), &device->rra_trace);
    radv_trap_handler_finish(device);
@@ -750,6 +790,8 @@ init_app_workarounds_entrypoints(struct radv_device *device, struct dispatch_tab
       SET_ENTRYPOINT(no_mans_sky, CreateImageView);
    } else if (!strcmp(instance->drirc.debug.app_layer, "strange_brigade")) {
       SET_ENTRYPOINT(strange_brigade, CmdPipelineBarrier2);
+   } else if (!strcmp(instance->drirc.debug.app_layer, "gfxbench5")) {
+      SET_ENTRYPOINT(gfxbench5, CmdPipelineBarrier2);
    }
 #undef SET_ENTRYPOINT
 
@@ -767,6 +809,7 @@ init_dispatch_tables(struct radv_device *device, struct radv_physical_device *pd
    b.tables[RADV_RGP_DISPATCH_TABLE] = &device->layer_dispatch.rgp;
    b.tables[RADV_RRA_DISPATCH_TABLE] = &device->layer_dispatch.rra;
    b.tables[RADV_RMV_DISPATCH_TABLE] = &device->layer_dispatch.rmv;
+   b.tables[RADV_UTRACE_DISPATCH_TABLE] = &device->layer_dispatch.utrace;
    b.tables[RADV_CTX_ROLL_DISPATCH_TABLE] = &device->layer_dispatch.ctx_roll;
 
    bool gather_ctx_rolls = instance->vk.trace_mode & RADV_TRACE_MODE_CTX_ROLLS;
@@ -785,6 +828,9 @@ init_dispatch_tables(struct radv_device *device, struct radv_physical_device *pd
    if (instance->vk.trace_mode & VK_TRACE_MODE_RMV)
       add_entrypoints(&b, &rmv_device_entrypoints, RADV_RMV_DISPATCH_TABLE);
 #endif
+
+   if (device->utrace.context)
+      add_entrypoints(&b, &utrace_device_entrypoints, RADV_UTRACE_DISPATCH_TABLE);
 
    if (gather_ctx_rolls)
       add_entrypoints(&b, &ctx_roll_device_entrypoints, RADV_CTX_ROLL_DISPATCH_TABLE);
@@ -812,7 +858,7 @@ capture_trace(VkQueue _queue)
 
    VkResult result = VK_SUCCESS;
 
-   if (instance->vk.trace_mode & RADV_TRACE_MODE_RRA)
+   if (instance->vk.trace_mode & (RADV_TRACE_MODE_RRA | RADV_TRACE_MODE_GAMMA))
       device->rra_trace.triggered = true;
 
    if (device->vk.memory_trace_data.is_enabled) {
@@ -1067,6 +1113,10 @@ radv_device_is_cache_disabled(const struct radv_device *device)
    if (device->debug_nir.valid_va.buffer_addr)
       return true;
 
+   /* The buffer address used for shader abort is hardcoded. */
+   if (device->shader_abort.buffer_addr)
+      return true;
+
    /* Pipeline caches can be disabled with RADV_DEBUG=nocache, with MESA_GLSL_CACHE_DISABLE=1 and
     * when ACO_DEBUG is used. MESA_GLSL_CACHE_DISABLE is done elsewhere.
     */
@@ -1131,6 +1181,7 @@ radv_device_init_compiler_info(struct radv_device *device)
       .hw =
          {
             .address32_hi = pdev->info.address32_hi,
+            .instr_prefetch_distance = pdev->info.instr_prefetch_distance,
             .address_prt_wa_control_bit = pdev->info.address_prt_wa_control_bit,
             .rbplus_allowed = pdev->info.rbplus_allowed,
          },
@@ -1167,12 +1218,13 @@ radv_device_init_compiler_info(struct radv_device *device)
             .disable_trunc_coord = instance->drirc.debug.disable_trunc_coord,
             .enable_mrt_output_nan_fixup = instance->drirc.debug.enable_mrt_output_nan_fixup,
             .emulate_rt = radv_emulate_rt(pdev),
-            .invariant_geom = instance->drirc.debug.invariant_geom,
             .split_fma = instance->drirc.debug.split_fma,
             .ssbo_non_uniform = instance->drirc.debug.ssbo_non_uniform,
             .tex_non_uniform = instance->drirc.debug.tex_non_uniform,
             .lower_terminate_to_discard = instance->drirc.debug.lower_terminate_to_discard,
             .no_implicit_varying_subgroup_size = instance->drirc.debug.no_implicit_varying_subgroup_size,
+            .force_nan_preserve_min_max = instance->drirc.debug.force_nan_preserve_min_max,
+            .nir_debug_info = !!(instance->debug_flags & RADV_DEBUG_NIR_DEBUG_INFO),
             .force_aniso = device->force_aniso,
             /* Use CHIP_UNKNOWN for increased compatiblity between caches. */
             .family = pdev->use_llvm ? pdev->info.family : CHIP_UNKNOWN,
@@ -1193,7 +1245,6 @@ radv_device_init_compiler_info(struct radv_device *device)
             .dump_asm = !!(instance->debug_flags & RADV_DEBUG_DUMP_ASM),
             .dump_meta_shaders = !!(instance->debug_flags & RADV_DEBUG_DUMP_META_SHADERS),
             .dump_shader_stats = !!(instance->debug_flags & RADV_DEBUG_DUMP_SHADER_STATS),
-            .nir_debug_info = !!(instance->debug_flags & RADV_DEBUG_NIR_DEBUG_INFO),
             .dump_shaders = dump_shaders,
             .check_ir = !!(instance->debug_flags & RADV_DEBUG_CHECKIR),
             .printf_enabled = !!device->debug_nir.printf.buffer_addr,
@@ -1201,6 +1252,7 @@ radv_device_init_compiler_info(struct radv_device *device)
             .trap_excp_flags = instance->trap_excp_flags,
             .debug_report = &instance->vk.debug_report,
             .debug_nir = &device->debug_nir,
+            .shader_abort = &device->shader_abort,
             .shader_dump_mtx = &instance->shader_dump_mtx,
             .keep_shader_info = device->keep_shader_info,
             .capture_shaders = (instance->debug_flags & RADV_DEBUG_DUMP_SHADERS) || device->keep_shader_info,
@@ -1244,9 +1296,49 @@ radv_device_init_compiler_info(struct radv_device *device)
    device->compiler_info = info;
 }
 
+static VkResult
+radv_create_winsys(struct radv_device *device)
+{
+#ifdef _WIN32
+   return VK_ERROR_INCOMPATIBLE_DRIVER;
+#else
+   const struct radv_physical_device *pdev = radv_device_physical(device);
+   const struct radv_instance *instance = radv_physical_device_instance(pdev);
+   drmDevicePtr drm_device;
+   VkResult result;
+   int fd = -1;
+   int r;
+
+   if (pdev->drm_device_type == RADV_DRM_DEVICE_AMDGPU || pdev->drm_device_type == RADV_DRM_DEVICE_VIRTIO) {
+      r = drmGetDeviceFromDevId(pdev->render_devid, 0, &drm_device);
+      if (r)
+         return VK_ERROR_INITIALIZATION_FAILED;
+
+      const char *path = drm_device->nodes[DRM_NODE_RENDER];
+
+      fd = open(path, O_RDWR | O_CLOEXEC);
+      drmFreeDevice(&drm_device);
+      if (fd < 0)
+         return VK_ERROR_INITIALIZATION_FAILED;
+   }
+
+   const bool is_virtio =
+      pdev->drm_device_type == RADV_DRM_DEVICE_AMDGPU_VPIPE || pdev->drm_device_type == RADV_DRM_DEVICE_VIRTIO;
+
+   result = radv_amdgpu_winsys_create(fd, &pdev->info, instance->debug_flags, instance->perftest_flags, is_virtio,
+                                      &device->ws);
+
+   if (fd != -1)
+      close(fd);
+
+   return result;
+#endif
+}
+
 static void
 radv_destroy_device(struct radv_device *device, const VkAllocationCallbacks *pAllocator)
 {
+   radv_device_finish_utrace(device);
    radv_device_finish_perf_counter(device);
 
    if (device->zero_bo) {
@@ -1306,6 +1398,9 @@ radv_destroy_device(struct radv_device *device, const VkAllocationCallbacks *pAl
    if (device->capture_replay_arena_vas)
       _mesa_hash_table_u64_destroy(device->capture_replay_arena_vas);
 
+   if (device->ws)
+      device->ws->destroy(device->ws);
+
    vk_device_finish(&device->vk);
    vk_free(&device->vk.alloc, device);
 }
@@ -1344,10 +1439,18 @@ radv_CreateDevice(VkPhysicalDevice physicalDevice, const VkDeviceCreateInfo *pCr
       return result;
    }
 
+   result = radv_create_winsys(device);
+   if (result != VK_SUCCESS)
+      goto fail;
+
    device->vk.get_timestamp = get_timestamp;
    device->vk.capture_trace = capture_trace;
 
    device->vk.command_buffer_ops = &radv_cmd_buffer_ops;
+
+   result = radv_device_init_utrace(device);
+   if (result != VK_SUCCESS)
+      goto fail;
 
    init_dispatch_tables(device, pdev);
 
@@ -1394,7 +1497,6 @@ radv_CreateDevice(VkPhysicalDevice physicalDevice, const VkDeviceCreateInfo *pCr
       fprintf(stderr, "radv: Forcing anisotropy filter to %ix\n", 1 << util_logbase2(device->force_aniso));
    }
 
-   device->ws = pdev->ws;
    device->vk.sync = device->ws->get_sync_provider(device->ws);
 
    /* Disable unordered submits when SQTT queue events are enabled because queue present events
@@ -1631,10 +1733,10 @@ radv_GetImageMemoryRequirements2(VkDevice _device, const VkImageMemoryRequiremen
    pMemoryRequirements->memoryRequirements.memoryTypeBits =
       ((1u << pdev->memory_properties.memoryTypeCount) - 1u) & ~pdev->memory_types_32bit;
 
-   if (image->vk.create_flags & VK_IMAGE_CREATE_PROTECTED_BIT)
+   if (image->vk.create_flags & VK_IMAGE_CREATE_2_PROTECTED_BIT_KHR)
       pMemoryRequirements->memoryRequirements.memoryTypeBits &= pdev->memory_types_protected;
 
-   if (image->vk.usage & VK_IMAGE_USAGE_HOST_TRANSFER_BIT) {
+   if (image->vk.usage & VK_IMAGE_USAGE_2_HOST_TRANSFER_BIT_KHR) {
       /* Only expose host visible memory types for images that need to be mapped on the CPU. */
       pMemoryRequirements->memoryRequirements.memoryTypeBits &= pdev->memory_types_host_visible;
    }
@@ -1965,12 +2067,44 @@ radv_GetDeviceFaultInfoEXT(VkDevice _device, VkDeviceFaultCountsEXT *pFaultCount
 }
 
 /* VK_KHR_device_fault */
+static void
+radv_shader_abort_get_data(struct radv_device *device, uint64_t *msg_data_size, uint8_t **msg_data)
+{
+   struct radv_shader_abort_data *shader_abort = &device->shader_abort;
+
+   *msg_data_size = 0;
+   *msg_data = NULL;
+
+   if (!shader_abort->buffer.map)
+      return;
+
+   device->vk.dispatch_table.DeviceWaitIdle(radv_device_to_handle(device));
+
+   uint32_t *data = shader_abort->buffer.map;
+
+   *msg_data_size = data[0] - sizeof(uint32_t); /* substract original offset */
+   *msg_data = (uint8_t *)shader_abort->buffer.map + sizeof(uint32_t);
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL
 radv_GetDeviceFaultDebugInfoKHR(VkDevice _device, VkDeviceFaultDebugInfoKHR *pDebugInfo)
 {
    VK_FROM_HANDLE(radv_device, device, _device);
 
    pDebugInfo->vendorBinarySize = 0;
+
+   VkDeviceFaultShaderAbortMessageInfoKHR *abort_msg_info =
+      vk_find_struct(pDebugInfo->pNext, DEVICE_FAULT_SHADER_ABORT_MESSAGE_INFO_KHR);
+   if (abort_msg_info) {
+      uint64_t msg_data_size;
+      uint8_t *msg_data;
+
+      radv_shader_abort_get_data(device, &msg_data_size, &msg_data);
+
+      abort_msg_info->messageDataSize = msg_data_size;
+      if (abort_msg_info->pMessageData && msg_data && msg_data_size > 0)
+         memcpy((uint8_t *)abort_msg_info->pMessageData, msg_data, msg_data_size);
+   }
 
    if (device->gpu_hang_report) {
       VkDeviceFaultVendorBinaryHeaderVersionOneKHR hdr = radv_get_device_fault_vendor_binary_header(device);

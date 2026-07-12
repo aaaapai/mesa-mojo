@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "compiler/brw/brw_eu_defines.h"
 #include "compiler/gen/gen.h"
+#include "compiler/gen/gen_enums.h"
+#include "compiler/gen/gen_names.h"
 #include "util/lut.h"
 #include "util/macros.h"
 #include "jay_ir.h"
@@ -16,20 +17,6 @@
       assert(x < ARRAY_SIZE(arr));                                             \
       arr[x];                                                                  \
    })
-
-static const char *gen_condition_str[] = {
-   [GEN_CONDITION_EQ] = ".eq", [GEN_CONDITION_NE] = ".ne",
-   [GEN_CONDITION_GT] = ".gt", [GEN_CONDITION_LT] = ".lt",
-   [GEN_CONDITION_GE] = ".ge", [GEN_CONDITION_LE] = ".le",
-   [GEN_CONDITION_OV] = ".ov", [GEN_CONDITION_UN] = ".nan",
-};
-
-static const char *jay_arf_str[] = {
-   [JAY_ARF_NULL] = "_",
-   [JAY_ARF_MASK] = "mask",
-   [JAY_ARF_CONTROL] = "ctrl",
-   [JAY_ARF_TIMESTAMP] = "timestamp",
-};
 
 static const char *jay_file_str[JAY_FILE_LAST + 1] = {
    [GPR] = "r",       [UGPR] = "u",      [FLAG] = "f",      [UFLAG] = "uf",
@@ -70,7 +57,7 @@ jay_print_def(FILE *fp, const jay_inst *I, int src)
       has_reg = false;
       fprintf(fp, "_");
    } else if (def.file == J_ARF) {
-      fputs(ENUM_TO_STR(jay_base_index(def), jay_arf_str), fp);
+      fputs(gen_arf_to_string(jay_base_index(def)), fp);
    } else if (def.collect) {
       assert(has_index && "else would be contiguous");
       fprintf(fp, "(");
@@ -151,12 +138,6 @@ jay_print_inst(FILE *fp, jay_inst *I)
    if (I->predication) {
       fprintf(fp, "(");
       jay_print_src(fp, I, jay_inst_get_predicate(I) - I->src);
-
-      if (jay_inst_has_default(I)) {
-         fprintf(fp, "/");
-         jay_print_src(fp, I, jay_inst_get_default(I) - I->src);
-      }
-
       fprintf(fp, ")");
    }
 
@@ -174,8 +155,9 @@ jay_print_inst(FILE *fp, jay_inst *I)
       fprintf(fp, ".(%s)", util_lut3_to_str[jay_bfn_ctrl(I)]);
    }
 
-   const char *cmod = ENUM_TO_STR(I->conditional_mod, gen_condition_str);
-   fprintf(fp, "%s%s ", I->saturate ? ".sat" : "", cmod ? cmod : "");
+   enum gen_condition cmod = I->conditional_mod;
+   fprintf(fp, "%s%s%s ", I->saturate ? ".sat" : "", cmod ? "." : "",
+           cmod ? gen_condition_to_string(cmod) : "");
    sep = "";
 
    for (unsigned i = 0; i < I->num_srcs - I->predication; i++) {
@@ -192,6 +174,12 @@ jay_print_inst(FILE *fp, jay_inst *I)
 
    if (I->op != JAY_OPCODE_MATH) {
       sep = jay_print_inst_info(fp, I, sep);
+   }
+
+   if (jay_inst_has_default(I)) {
+      fprintf(fp, "%sdefault ", sep);
+      jay_print_src(fp, I, jay_inst_get_default(I) - I->src);
+      sep = ", ";
    }
 
    /* Software scoreboard dependency info */
@@ -228,7 +216,9 @@ jay_print_block(FILE *fp, jay_block *block)
 {
    indent(fp, block, false);
    fprintf(fp, "B%d%s%s", block->index, block->uniform ? " [uniform]" : "",
-           block->loop_header ? " [loop header]" : "");
+           block->loop_header          ? " [loop header]" :
+           block->physical_loop_header ? " [physical loop header]" :
+                                         "");
    bool first = true;
    jay_foreach_predecessor(block, p, GPR) {
       fprintf(fp, "%s B%d", first ? " <-" : "", (*p)->index);

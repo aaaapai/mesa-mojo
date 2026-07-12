@@ -329,7 +329,7 @@ v3d_init_screen_caps(struct v3d_screen *screen)
         caps->max_texture_3d_levels = V3D_MAX_MIP_LEVELS;
         caps->max_texture_array_layers = V3D_MAX_ARRAY_LAYERS;
 
-        caps->max_render_targets = V3D_MAX_RENDER_TARGETS(screen->devinfo.ver);
+        caps->max_render_targets = screen->devinfo.max_render_targets;
         caps->fbfetch = caps->max_render_targets;
         caps->fbfetch_coherent = true;
         caps->max_dual_source_render_targets = 1;
@@ -369,6 +369,7 @@ v3d_init_screen_caps(struct v3d_screen *screen)
 
         caps->clip_planes = 0;
         caps->depth_clip_disable = screen->devinfo.ver >= 71;
+        caps->clip_halfz = screen->devinfo.ver >= 71;
 
         caps->min_line_width =
         caps->min_line_width_aa =
@@ -592,13 +593,17 @@ v3d_screen_get_compiler_options(struct pipe_screen *pscreen,
                 .lower_interpolate_at = true,
                 .lower_int64_options =
                         nir_lower_bcsel64 |
+                        nir_lower_bit_count64 |
                         nir_lower_conv64 |
+                        nir_lower_divmod64 |
+                        nir_lower_iabs64 |
                         nir_lower_iadd64 |
                         nir_lower_icmp64 |
                         nir_lower_imul_2x32_64 |
                         nir_lower_imul64 |
                         nir_lower_ineg64 |
                         nir_lower_logic64 |
+                        nir_lower_minmax64 |
                         nir_lower_shift64 |
                         nir_lower_ufind_msb64,
                 .lower_fquantize2f16 = true,

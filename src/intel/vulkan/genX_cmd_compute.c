@@ -396,6 +396,7 @@ compute_update_async_threads_limit(struct anv_cmd_buffer *cmd_buffer,
 
    intel_compute_engine_async_threads_limit(devinfo, dispatch->threads,
                                             slm_or_barrier_enabled,
+                                            prog_data->uses_fence,
                                             &pixel_async_compute_thread_limit,
                                             &z_pass_async_compute_thread_limit,
                                             &np_z_async_throttle_settings);
@@ -430,46 +431,40 @@ compute_update_async_threads_limit(struct anv_cmd_buffer *cmd_buffer,
    }
 }
 
+struct compute_walker_inline_params_val {
+   const struct anv_pipeline_bind_map *bind_map;
+   const uint32_t *push_data;
+   uint64_t push_addr64;
+   uint32_t base_wg[3];
+   uint32_t num_wg[3];
+   uint32_t unaligned_x_offset;
+};
+
 static inline uint32_t
 fill_inline_param(uint8_t param_value,
-                  const uint32_t *push_data,
-                  uint64_t push_addr64,
-                  uint32_t base_wg[3],
-                  uint32_t num_wg[3],
-                  uint32_t unaligned_x_offset)
+                  const struct compute_walker_inline_params_val *values)
 {
    switch (param_value) {
-   case ANV_INLINE_DWORD_PUSH_ADDRESS_LDW:               return push_addr64 & 0xffffffff;
-   case ANV_INLINE_DWORD_PUSH_ADDRESS_UDW:               return push_addr64 >> 32;
-   case anv_drv_const_dword(cs.num_workgroups[0]):       return num_wg[0];
-   case anv_drv_const_dword(cs.num_workgroups[1]):       return num_wg[1];
-   case anv_drv_const_dword(cs.num_workgroups[2]):       return num_wg[2];
-   case anv_drv_const_dword(cs.base_workgroup[0]):       return base_wg[0];
-   case anv_drv_const_dword(cs.base_workgroup[1]):       return base_wg[1];
-   case anv_drv_const_dword(cs.base_workgroup[2]):       return base_wg[2];
-   case anv_drv_const_dword(cs.unaligned_invocations_x): return unaligned_x_offset;
-   default:                                              return push_data[param_value];
+   case ANV_INLINE_DWORD_PUSH_ADDRESS_LDW:               return values->push_addr64 & 0xffffffff;
+   case ANV_INLINE_DWORD_PUSH_ADDRESS_UDW:               return values->push_addr64 >> 32;
+   case anv_drv_const_dword(cs.num_workgroups[0]):       return values->num_wg[0];
+   case anv_drv_const_dword(cs.num_workgroups[1]):       return values->num_wg[1];
+   case anv_drv_const_dword(cs.num_workgroups[2]):       return values->num_wg[2];
+   case anv_drv_const_dword(cs.base_workgroup[0]):       return values->base_wg[0];
+   case anv_drv_const_dword(cs.base_workgroup[1]):       return values->base_wg[1];
+   case anv_drv_const_dword(cs.base_workgroup[2]):       return values->base_wg[2];
+   case anv_drv_const_dword(cs.unaligned_invocations_x): return values->unaligned_x_offset;
+   default:                                              return values->push_data[param_value];
    }
 }
 
 static inline void
 fill_inline_params(uint32_t *compute_walker_inline_data,
-                   const struct anv_cmd_compute_state *comp_state,
-                   uint64_t push_addr64,
-                   uint32_t base_wg[3],
-                   uint32_t num_wg[3],
-                   uint32_t unaligned_x_offset)
+                   const struct compute_walker_inline_params_val *values)
 {
-   const uint32_t *push_data =
-      (const uint32_t *)&comp_state->base.push_constants;
-   const struct anv_pipeline_bind_map *bind_map =
-      &comp_state->shader->bind_map;
 
-   for (uint32_t i = 0; i < bind_map->inline_dwords_count; i++) {
-      compute_walker_inline_data[i] = fill_inline_param(
-         bind_map->inline_dwords[i], push_data, push_addr64,
-         base_wg, num_wg, unaligned_x_offset);
-   }
+   for (uint32_t i = 0; i < values->bind_map->inline_dwords_count; i++)
+      compute_walker_inline_data[i] = fill_inline_param(values->bind_map->inline_dwords[i], values);
 }
 
 static inline void
@@ -478,25 +473,41 @@ cmd_buffer_post_dispatch_wa(struct anv_cmd_buffer *cmd_buffer)
    genX(cmd_buffer_post_dispatch_wa)(cmd_buffer);
 
    struct anv_cmd_compute_state *comp_state = &cmd_buffer->state.compute;
+   const struct anv_shader *shader = comp_state->shader;
    const struct anv_instance *instance = cmd_buffer->device->physical->instance;
 
    /* Workaround WaW hazards in applications that clear a buffer and start
     * writing to it immediately without a barrier between the clear & write
     * operations.
     */
-   if (instance->drirc.debug.barrier_post_typed_clear_shader &&
-       (comp_state->shader->bind_map.inferred_behavior & ANV_PIPELINE_BEHAVIOR_CLEAR_TYPED)) {
+   if ((instance->drirc.debug.barrier_post_typed_clear_shader &&
+        (shader->bind_map.inferred_behavior & ANV_PIPELINE_BEHAVIOR_CLEAR_TYPED)) ||
+       shader->workaround.force_typed_barrier_after_dispatch_to_top) {
       anv_add_pending_pipe_bits(cmd_buffer,
                                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                                 VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
                                 ANV_PIPE_HDC_PIPELINE_FLUSH_BIT,
                                 "clear shader typed L1 flush app wa");
+   } else if (shader->workaround.force_typed_barrier_after_dispatch_to_compute) {
+      anv_add_pending_pipe_bits(cmd_buffer,
+                                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                                ANV_PIPE_HDC_PIPELINE_FLUSH_BIT,
+                                "clear shader typed L1 flush app wa");
    }
-   if (instance->drirc.debug.barrier_post_untyped_clear_shader &&
-       (comp_state->shader->bind_map.inferred_behavior & ANV_PIPELINE_BEHAVIOR_CLEAR_UNTYPED)) {
+   if ((instance->drirc.debug.barrier_post_untyped_clear_shader &&
+        (comp_state->shader->bind_map.inferred_behavior & ANV_PIPELINE_BEHAVIOR_CLEAR_UNTYPED)) ||
+       shader->workaround.force_untyped_barrier_after_dispatch_to_top) {
       anv_add_pending_pipe_bits(cmd_buffer,
                                 VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                                 VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+                                ANV_PIPE_UNTYPED_DATAPORT_CACHE_FLUSH_BIT |
+                                ANV_PIPE_HDC_PIPELINE_FLUSH_BIT,
+                                "clear shader untyped L1 flush app wa");
+   } else if (shader->workaround.force_untyped_barrier_after_dispatch_to_compute) {
+      anv_add_pending_pipe_bits(cmd_buffer,
+                                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                                 ANV_PIPE_UNTYPED_DATAPORT_CACHE_FLUSH_BIT |
                                 ANV_PIPE_HDC_PIPELINE_FLUSH_BIT,
                                 "clear shader untyped L1 flush app wa");
@@ -520,8 +531,20 @@ emit_indirect_compute_walker(struct anv_cmd_buffer *cmd_buffer,
    uint64_t indirect_addr64 = anv_address_physical(indirect_addr);
 
    uint64_t push_addr64 = anv_address_physical(
-      anv_state_pool_state_address(&cmd_buffer->device->general_state_pool,
+      anv_state_pool_state_address(anv_device_get_general_state_pool(cmd_buffer->device),
                                    comp_state->base.push_constants_state));
+   struct compute_walker_inline_params_val inline_value = {
+      .bind_map = &comp_state->shader->bind_map,
+      .push_data = (const uint32_t *)&comp_state->base.push_constants,
+      .push_addr64 = push_addr64,
+      .base_wg = {0, 0, 0},
+      .num_wg = {
+         UINT32_MAX,
+         indirect_addr64 & 0xffffffff,
+         indirect_addr64 >> 32,
+      },
+      .unaligned_x_offset = 0,
+   };
 
    compute_update_async_threads_limit(cmd_buffer, prog_data, &dispatch);
 
@@ -533,14 +556,7 @@ emit_indirect_compute_walker(struct anv_cmd_buffer *cmd_buffer,
       },
    };
 
-   uint32_t num_workgroup_data[3] = {
-      UINT32_MAX,
-      indirect_addr64 & 0xffffffff,
-      indirect_addr64 >> 32,
-   };
-   fill_inline_params(body.InlineData, comp_state, push_addr64,
-                      (uint32_t[]) {0, 0, 0},
-                      num_workgroup_data, 0);
+   fill_inline_params(body.InlineData, &inline_value);
 
    cmd_buffer->state.last_indirect_dispatch =
       anv_batch_emitn_merge_at(
@@ -573,21 +589,31 @@ emit_compute_walker(struct anv_cmd_buffer *cmd_buffer,
 
    compute_update_async_threads_limit(cmd_buffer, prog_data, &dispatch);
 
-   uint32_t num_workgroup_data[3];
+   uint64_t push_addr64 = anv_address_physical(
+      anv_state_pool_state_address(anv_device_get_general_state_pool(cmd_buffer->device),
+                                   comp_state->base.push_constants_state));
+   struct compute_walker_inline_params_val inline_value = {
+      .bind_map = &comp_state->shader->bind_map,
+      .push_data = (const uint32_t *)&comp_state->base.push_constants,
+      .push_addr64 = push_addr64,
+      .base_wg = {
+         base_wg[0],
+         base_wg[1],
+         base_wg[2],
+      },
+      .unaligned_x_offset = unaligned_invocations_x,
+   };
    if (!anv_address_is_null(indirect_addr)) {
       uint64_t indirect_addr64 = anv_address_physical(indirect_addr);
-      num_workgroup_data[0] = UINT32_MAX;
-      num_workgroup_data[1] = indirect_addr64 & 0xffffffff;
-      num_workgroup_data[2] = indirect_addr64 >> 32;
+      inline_value.num_wg[0] = UINT32_MAX;
+      inline_value.num_wg[1] = indirect_addr64 & 0xffffffff;
+      inline_value.num_wg[2] = indirect_addr64 >> 32;
    } else {
-      num_workgroup_data[0] = num_wg[0];
-      num_workgroup_data[1] = num_wg[1];
-      num_workgroup_data[2] = num_wg[2];
+      inline_value.num_wg[0] = num_wg[0];
+      inline_value.num_wg[1] = num_wg[1];
+      inline_value.num_wg[2] = num_wg[2];
    }
 
-   uint64_t push_addr64 = anv_address_physical(
-      anv_state_pool_state_address(&cmd_buffer->device->general_state_pool,
-                                   comp_state->base.push_constants_state));
 
    struct GENX(COMPUTE_WALKER_BODY) body = {
       .InterfaceDescriptor            = get_interface_descriptor_data_tables(cmd_buffer),
@@ -600,9 +626,7 @@ emit_compute_walker(struct anv_cmd_buffer *cmd_buffer,
       },
    };
 
-   fill_inline_params(body.InlineData, comp_state, push_addr64,
-                      base_wg, num_workgroup_data,
-                      unaligned_invocations_x);
+   fill_inline_params(body.InlineData, &inline_value);
 
    cmd_buffer->state.last_compute_walker =
       anv_batch_emitn_merge_at(
@@ -909,8 +933,7 @@ genX(cmd_buffer_ray_query_globals)(struct anv_cmd_buffer *cmd_buffer)
             .bo = device->ray_query_bo[idx],
             .offset = (i + 1) * (device->ray_query_bo[idx]->size / 2),
          },
-         .AsyncRTStackSize =
-            cmd_buffer->state.rt.scratch.layout.ray_stack_stride / 64,
+         .AsyncRTStackSize = BRW_RT_SIZEOF_RAY_QUERY / 64,
          .NumDSSRTStacks = stack_ids_per_dss,
          .MaxBVHLevels = BRW_RT_MAX_BVH_LEVELS,
          .Flags = RT_DEPTH_TEST_LESS_EQUAL,

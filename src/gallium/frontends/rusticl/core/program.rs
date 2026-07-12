@@ -7,6 +7,7 @@ use crate::core::context::*;
 use crate::core::device::*;
 use crate::core::kernel::*;
 use crate::core::platform::Platform;
+use crate::core::version::CLVersion;
 use crate::impl_cl_type_trait;
 
 use mesa_rust::compiler::clc::spirv::SPIRVBin;
@@ -14,6 +15,7 @@ use mesa_rust::compiler::clc::*;
 use mesa_rust::compiler::nir::*;
 use mesa_rust::util::disk_cache::*;
 use mesa_rust_gen::*;
+use mesa_rust_util::string::CStrExt;
 use mesa_rust_util::string::CStringExt;
 use mesa_rust_util::string::Join;
 use rusticl_llvm_gen::*;
@@ -190,6 +192,14 @@ impl ProgramBuild {
     pub fn has_successful_build(&self) -> bool {
         self.builds_by_device.values().any(|b| b.is_success())
     }
+
+    pub fn options(&self, dev: &Device) -> &CStr {
+        &self.dev_build(dev).options.raw_string
+    }
+
+    pub fn log(&self, dev: &Device) -> &CStr {
+        &self.dev_build(dev).log
+    }
 }
 
 #[derive(Default)]
@@ -285,37 +295,31 @@ pub struct HeaderProgram {
     pub program: Arc<Program>,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct ParsedCompileOptions {
-    raw_string: String,
+    raw_string: CString,
+    clc_target: Option<CLVersion>,
+    create_lib: bool,
 }
 
 impl ParsedCompileOptions {
-    fn from_option_str(options: &str) -> Self {
+    fn from_option_str(options: &CStr) -> Self {
         Self {
             raw_string: options.to_owned(),
+            ..Default::default()
         }
     }
 }
 
-struct CompileOptions {
+pub struct CompileOptions {
     clang_args: Vec<CString>,
     parsed: ParsedCompileOptions,
 }
 
 impl CompileOptions {
-    fn new(options: &str, dev: &Device) -> Self {
-        let parsed_options = ParsedCompileOptions::from_option_str(options);
-        let mut options = options.to_owned();
-        if !options.contains("-cl-std=") {
-            options.push_str(" -cl-std=CL");
-            options.push_str(dev.clc_version.api_str());
-        }
-        options.push_str(" -D__OPENCL_VERSION__=");
-        options.push_str(dev.cl_version.clc_str());
-
+    /// Tokenizes an options string, splitting on spaces but respecting double-quoted strings.
+    fn tokenize(options: &str) -> Vec<&str> {
         let mut res = Vec::new();
-
         // we seperate on a ' ' unless we hit a "
         let mut sep = ' ';
         let mut old = 0;
@@ -338,32 +342,161 @@ impl CompileOptions {
         }
         // add end of the string
         res.push(&options[old..]);
+        res
+    }
 
-        let strings = res
-            .iter()
-            .filter_map(|&a| match a {
-                // CL3.1 doesn't add anything that's not already supported in clang, so just replace
-                // the argument with 3.0 so we'll be fine with an older version of clang.
-                "-cl-std=CL3.1" => Some("-cl-std=CL3.0"),
-                "-cl-denorms-are-zero" => Some("-fdenormal-fp-math=positive-zero"),
+    pub fn new(options: &CStr, err: cl_int) -> CLResult<Self> {
+        let mut parsed_options = ParsedCompileOptions::from_option_str(options);
+        if options.is_empty() {
+            return Ok(CompileOptions {
+                parsed: parsed_options,
+                clang_args: Vec::new(),
+            });
+        }
+
+        let options = options.to_str().map_err(|_| err)?;
+        let res = Self::tokenize(options);
+
+        let mut strings = Vec::new();
+        let mut iter = res.into_iter();
+        while let Some(token) = iter.next() {
+            match token {
+                // Math Intrinsics Options
+                "-cl-single-precision-constant"
+                | "-cl-fp32-correctly-rounded-divide-sqrt"
+                // Optimization Options
+                | "-cl-opt-disable"
+                | "-cl-strict-aliasing"
+                | "-cl-mad-enable"
+                | "-cl-no-signed-zeros"
+                | "-cl-unsafe-math-optimizations"
+                | "-cl-finite-math-only"
+                | "-cl-fast-relaxed-math"
+                | "-cl-uniform-work-group-size"
+                // Warning Options
+                | "-w"
+                | "-Werror"
+                // Debug Options
+                | "-g"
+                // Query Options
+                | "-cl-kernel-arg-info"
+                // Accepted for compatibility
+                | "-enable-link-options" => {
+                    strings.push(CString::new(token).unwrap());
+                }
+                // OpenCL C Version
+                "-cl-std=CL1.0" => parsed_options.clc_target = Some(CLVersion::Cl1_0),
+                "-cl-std=CL1.1" => parsed_options.clc_target = Some(CLVersion::Cl1_1),
+                "-cl-std=CL1.2" => parsed_options.clc_target = Some(CLVersion::Cl1_2),
+                "-cl-std=CL2.0" => parsed_options.clc_target = Some(CLVersion::Cl2_0),
+                "-cl-std=CL3.0" => parsed_options.clc_target = Some(CLVersion::Cl3_0),
+                "-cl-std=CL3.1" => parsed_options.clc_target = Some(CLVersion::Cl3_1),
+                "-cl-denorms-are-zero" => {
+                    strings.push(c"-fdenormal-fp-math=positive-zero".to_owned());
+                }
+                "-create-library" => {
+                    parsed_options.create_lib = true;
+                    strings.push(c"-create-library".to_owned());
+                }
                 // We can ignore it as long as we don't support ifp
-                "-cl-no-subgroup-ifp" => None,
+                "-cl-no-subgroup-ifp" => {}
                 // This indicates how many registers per thread should be used, we just ignore it.
-                "-cl-intel-256-GRF-per-thread" => None,
+                "-cl-intel-256-GRF-per-thread" => {}
                 // Some applications use this argument when they detect Intel hardware.
-                "-cl-intel-greater-than-4GB-buffer-required" => None,
+                "-cl-intel-greater-than-4GB-buffer-required" => {}
                 // Some applications use this when they detect QC hardware
-                "-qcom-accelerate-16-bit" => None,
-                _ => Some(a),
-            })
-            .map(CString::new)
-            .map(Result::unwrap)
-            .collect();
+                "-qcom-accelerate-16-bit" => {}
+                // Preprocessor: -D name / -D name=definition / -I dir
+                "-D" | "-I" => {
+                    let arg = iter.next().ok_or(err)?;
+                    if arg.is_empty() {
+                        return Err(err);
+                    }
+                    strings.push(CString::new(token).unwrap());
+                    strings.push(CString::new(arg).unwrap());
+                }
+                // We ignore empty tokens
+                "" => {}
+                _ => {
+                    // Implementation-defined: accept -Dname / -Dname=value / -Idir
+                    // without a space. The spec requires a space between -D/-I and
+                    // the argument, but allows implementations to accept this form,
+                    // following common C compiler practice.
+                    if token.starts_with("-D") || token.starts_with("-I") {
+                        strings.push(CString::new(token).unwrap());
+                    } else {
+                        return Err(err);
+                    }
+                }
+            }
+        }
 
-        Self {
+        Ok(Self {
             parsed: parsed_options,
             clang_args: strings,
+        })
+    }
+
+    fn get_clang_args(&self, dev: &Device) -> Vec<CString> {
+        let mut args = self.clang_args.clone();
+        args.push(c"-D__OPENCL_VERSION__=".concat(dev.cl_version.clc_str()));
+
+        let clc_ver = self.parsed.clc_target.unwrap_or(dev.clc_version);
+        match clc_ver {
+            CLVersion::Cl3_1 => {
+                // CL3.1 doesn't add anything that's not already supported in clang, so just replace
+                // the argument with 3.0 so we'll be fine with an older version of clang.
+                args.push(c"-cl-std=CL3.0".to_owned());
+            }
+            ver => args.push(c"-cl-std=CL".concat(ver.api_cstr())),
         }
+
+        // We set this define ourselves, so that we don't rely on clang to set it properly as 3.1
+        // is still quite new and we can't rely on users having a clang that supports this.
+        if clc_ver >= CLVersion::Cl3_1 {
+            args.push(c"-U__OPENCL_C_VERSION__".to_owned());
+            args.push(c"-D__OPENCL_C_VERSION__=".concat(clc_ver.clc_str()));
+            args.push(c"-DCL_VERSION_3_1=310".to_owned());
+        }
+
+        args
+    }
+}
+
+/// Parsed and validated link options.
+struct LinkOptions {
+    create_lib: bool,
+}
+
+impl LinkOptions {
+    /// Parses and validates link options according to the OpenCL 3.0 specification
+    /// (Section 5.8.7). Returns CL_INVALID_LINKER_OPTIONS if any option is invalid.
+    fn new(options: &CStr) -> CLResult<Self> {
+        let mut create_lib = false;
+
+        if options.is_empty() {
+            return Ok(Self { create_lib });
+        }
+
+        let options = options.to_str().map_err(|_| CL_INVALID_LINKER_OPTIONS)?;
+
+        for token in options.split_whitespace() {
+            match token {
+                "-create-library" => {
+                    create_lib = true;
+                }
+                "-enable-link-options"
+                | "-cl-denorms-are-zero"
+                | "-cl-no-signed-zeros"
+                | "-cl-unsafe-math-optimizations"
+                | "-cl-finite-math-only"
+                | "-cl-fast-relaxed-math"
+                | "-cl-no-subgroup-ifp" => {}
+                _ => return Err(CL_INVALID_LINKER_OPTIONS),
+            }
+        }
+
+        Ok(Self { create_lib })
     }
 }
 
@@ -533,16 +666,8 @@ impl Program {
         self.build_info().dev_build(dev).status
     }
 
-    pub fn log(&self, dev: &Device) -> CString {
-        self.build_info().dev_build(dev).log.clone()
-    }
-
     pub fn bin_type(&self, dev: &Device) -> cl_program_binary_type {
         self.build_info().dev_build(dev).bin_type
-    }
-
-    pub fn options(&self, dev: &Device) -> String {
-        self.build_info().dev_build(dev).options.raw_string.clone()
     }
 
     // we need to precalculate the size
@@ -626,14 +751,14 @@ impl Program {
     pub fn build(
         self: Arc<Self>,
         devices: Vec<&'static Device>,
-        options: String,
+        options: CompileOptions,
         callback: Option<ProgramCB>,
     ) -> CLResult<()> {
         self.set_builds_in_progress(&devices)?;
 
         // If the caller did not provide a callback, block until build finishes.
         if callback.is_none() {
-            self.context
+            Platform::get()
                 .worker_queue
                 .add_job_sync(create_build_closure(
                     Arc::clone(&self),
@@ -651,7 +776,7 @@ impl Program {
                 return Err(CL_BUILD_PROGRAM_FAILURE);
             }
         } else {
-            self.context.worker_queue.add_job(create_build_closure(
+            Platform::get().worker_queue.add_job(create_build_closure(
                 Arc::clone(&self),
                 devices,
                 options,
@@ -665,11 +790,10 @@ impl Program {
     fn do_compile(
         &self,
         device: &Device,
-        options: &str,
+        options: &CompileOptions,
         headers: &[HeaderProgram],
         build_info: &mut MutexGuard<ProgramBuild>,
     ) -> bool {
-        let options = CompileOptions::new(options, device);
         let device_build = build_info.dev_build_mut(device);
 
         let val_options = clc_validator_options(device);
@@ -682,7 +806,7 @@ impl Program {
                 }
             }
             ProgramSourceType::Src(src) => {
-                let clang_args = &options.clang_args;
+                let clang_args = options.get_clang_args(device);
                 let headers: Vec<_> = headers
                     .iter()
                     .map(|header| {
@@ -712,7 +836,7 @@ impl Program {
 
                 let (spirv, msgs) = spirv::SPIRVBin::from_clc(
                     src,
-                    clang_args,
+                    &clang_args,
                     &headers,
                     get_disk_cache(),
                     device.cl_features(),
@@ -739,7 +863,7 @@ impl Program {
 
         device_build.spirv = spirv;
         device_build.log = log;
-        device_build.options = options.parsed;
+        device_build.options = options.parsed.clone();
 
         if device_build.spirv.is_some() {
             device_build.status = CL_BUILD_SUCCESS as cl_build_status;
@@ -754,7 +878,7 @@ impl Program {
     pub fn compile(
         self: Arc<Self>,
         devices: Vec<&'static Device>,
-        options: String,
+        options: CompileOptions,
         headers: Vec<HeaderProgram>,
         callback: Option<ProgramCB>,
     ) -> CLResult<()> {
@@ -763,7 +887,7 @@ impl Program {
         // If the caller did not provide a callback, block until compile
         // finishes.
         if callback.is_none() {
-            self.context
+            Platform::get()
                 .worker_queue
                 .add_job_sync(create_compile_closure(
                     Arc::clone(&self),
@@ -782,7 +906,7 @@ impl Program {
                 return Err(CL_COMPILE_PROGRAM_FAILURE);
             }
         } else {
-            self.context.worker_queue.add_job(create_compile_closure(
+            Platform::get().worker_queue.add_job(create_compile_closure(
                 Arc::clone(&self),
                 devices,
                 options,
@@ -798,9 +922,13 @@ impl Program {
         context: Arc<Context>,
         devices: Vec<&'static Device>,
         input_programs: Vec<Arc<Self>>,
-        options: String,
+        options: &CStr,
         callback: Option<ProgramCB>,
     ) -> CLResult<(Arc<Self>, cl_int)> {
+        // Validate options before starting the link.
+        // clLinkProgram must return CL_INVALID_LINKER_OPTIONS if options are invalid.
+        let options = LinkOptions::new(options)?;
+
         // Link can begin, so we must return a valid program object.
         let builds_by_device = devices
             .iter()
@@ -834,8 +962,7 @@ impl Program {
         // If the caller did not provide a callback, block until compile
         // finishes.
         let status = if callback.is_none() {
-            program
-                .context
+            Platform::get()
                 .worker_queue
                 .add_job_sync(create_link_closure(
                     Arc::clone(&program),
@@ -854,7 +981,7 @@ impl Program {
                 CL_LINK_PROGRAM_FAILURE
             }
         } else {
-            program.context.worker_queue.add_job(create_link_closure(
+            Platform::get().worker_queue.add_job(create_link_closure(
                 Arc::clone(&program),
                 devices,
                 input_programs,
@@ -971,9 +1098,10 @@ impl Program {
 fn debug_logging(p: &Program, devs: &[&Device]) {
     if Platform::dbg().program {
         for dev in devs {
-            let msg = p.log(dev);
+            let build_info = p.build_info();
+            let msg = build_info.log(dev);
             if !msg.is_empty() {
-                eprintln!("{msg:?}");
+                eprintln!("{}", msg.to_string_lossy());
             }
         }
     }
@@ -986,11 +1114,11 @@ fn debug_logging(p: &Program, devs: &[&Device]) {
 fn create_build_closure(
     program: Arc<Program>,
     devices: Vec<&'static Device>,
-    options: String,
+    options: CompileOptions,
     mut callback: Option<ProgramCB>,
 ) -> impl FnMut() + Send + Sync + 'static {
     move || {
-        let is_lib = options.contains("-create-library");
+        let is_lib = options.parsed.create_lib;
         let mut build_info = program.build_info();
 
         for &device in &devices {
@@ -1037,7 +1165,7 @@ fn create_build_closure(
 fn create_compile_closure(
     program: Arc<Program>,
     devices: Vec<&'static Device>,
-    options: String,
+    options: CompileOptions,
     headers: Vec<HeaderProgram>,
     mut callback: Option<ProgramCB>,
 ) -> impl FnMut() + Send + Sync + 'static {
@@ -1070,12 +1198,12 @@ fn create_link_closure(
     program: Arc<Program>,
     devices: Vec<&'static Device>,
     input_programs: Vec<Arc<Program>>,
-    options: String,
+    options: LinkOptions,
     mut callback: Option<ProgramCB>,
 ) -> impl FnMut() + Send + Sync + 'static {
     move || {
         let mut locks: Vec<_> = input_programs.iter().map(|p| p.build_info()).collect();
-        let is_lib = options.contains("-create-library");
+        let is_lib = options.create_lib;
 
         let mut build_info = program.build_info();
 

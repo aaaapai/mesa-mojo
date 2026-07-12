@@ -17,18 +17,16 @@
 mtl_device *
 mtl_device_create()
 {
-   mtl_device *device = 0u;
+   mtl_device *device = nil;
 
    @autoreleasepool {
       NSArray<id<MTLDevice>> *devs = [MTLCopyAllDevices() autorelease];
       uint32_t device_count = [devs count];
       
       for (uint32_t i = 0u; i < device_count; ++i) {
-         if (@available(macOS 10.15, *)) {
-            if (!device && [devs[i] supportsFamily:MTLGPUFamilyMetal3]) {
-               device = (mtl_device *)[devs[i] retain];
-               break;
-            }
+         if ([devs[i] supportsFamily:MTLGPUFamilyMetal4]) {
+            device = (mtl_device *)[devs[i] retain];
+            break;
          }
       }
    }
@@ -91,21 +89,18 @@ mtl_device_get_architecture_name(mtl_device *dev, char buffer[256])
    }
 }
 
-uint64_t
-mtl_device_get_peer_group_id(mtl_device *dev)
-{
-   @autoreleasepool {
-      id<MTLDevice> device = (id<MTLDevice>)dev;
-      return device.peerGroupID;
-   }
-}
-
 uint32_t
-mtl_device_get_peer_index(mtl_device *dev)
+mtl_device_get_gpu_apple_family(mtl_device *dev)
 {
    @autoreleasepool {
       id<MTLDevice> device = (id<MTLDevice>)dev;
-      return device.peerIndex;
+      uint32_t gpu_family = 0u;
+      MTLGPUFamily family = MTLGPUFamilyApple1;
+      while([device supportsFamily:family]) {
+         family += 1u;
+         gpu_family += 1u;
+      }
+      return gpu_family;
    }
 }
 
@@ -299,5 +294,23 @@ mtl_new_buffer_with_bytes_no_copy(mtl_device *device, void* ptr,
    @autoreleasepool {
       id<MTLDevice> dev = (id<MTLDevice>)device;
       return [dev newBufferWithBytesNoCopy:ptr length:size_B options:KK_MTL_RESOURCE_OPTIONS deallocator:nil];
+   }
+}
+
+mtl_command_allocator *
+mtl_new_command_allocator(mtl_device *device)
+{
+   @autoreleasepool {
+      id<MTLDevice> dev = (id<MTLDevice>)device;
+      return [dev newCommandAllocator];
+   }
+}
+
+mtl_command_buffer *
+mtl_new_command_buffer(mtl_device *device)
+{
+   @autoreleasepool {
+      id<MTLDevice> dev = (id<MTLDevice>)device;
+      return [dev newCommandBuffer];
    }
 }

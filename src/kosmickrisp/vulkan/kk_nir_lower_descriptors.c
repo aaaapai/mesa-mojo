@@ -808,23 +808,22 @@ lower_poly(struct nir_builder *b, nir_intrinsic_instr *intrin, void *data)
 {
    switch (intrin->intrinsic) {
    case nir_intrinsic_load_vs_outputs_poly:
-      return lower_sysval_to_root_table(b, intrin, draw.vertex_outputs);
+      return lower_sysval_to_per_draw(b, intrin, vertex_outputs);
    case nir_intrinsic_load_vertex_param_buffer_poly:
-      return lower_sysval_to_root_table(b, intrin, draw.vertex_params);
+      return lower_sysval_to_per_draw(b, intrin, vertex_params);
    case nir_intrinsic_load_tess_param_buffer_poly:
-      return lower_sysval_to_root_table(b, intrin, draw.tess_params);
+      return lower_sysval_to_per_draw(b, intrin, tess_params);
    case nir_intrinsic_load_index_size_poly:
-      return lower_sysval_to_root_table(b, intrin, draw.index_size);
+      return lower_sysval_to_per_draw(b, intrin, index_size);
    case nir_intrinsic_load_first_vertex:
       /* Lower only compute shaders */
       if (*(bool *)data) {
-         uint32_t root_table_offset =
-            kk_root_descriptor_offset(draw.base_vertex_addr);
+         uint32_t root_table_offset = kk_per_draw_offset(base_vertex_addr);
          b->cursor = nir_instr_remove(&intrin->instr);
          assert((root_table_offset & 3) == 0 && "aligned");
 
-         nir_def *addr = load_root(b, intrin->def.num_components, 64u,
-                                   nir_imm_int(b, root_table_offset), 4);
+         nir_def *addr = load_per_draw(b, intrin->def.num_components, 64u,
+                                       nir_imm_int(b, root_table_offset), 4);
 
          nir_def *val = nir_load_global(b, 1u, intrin->def.bit_size, addr);
 
@@ -835,13 +834,12 @@ lower_poly(struct nir_builder *b, nir_intrinsic_instr *intrin, void *data)
    case nir_intrinsic_load_base_instance:
       /* Lower only compute shaders */
       if (*(bool *)data) {
-         uint32_t root_table_offset =
-            kk_root_descriptor_offset(draw.base_instance_addr);
+         uint32_t root_table_offset = kk_per_draw_offset(base_instance_addr);
          b->cursor = nir_instr_remove(&intrin->instr);
          assert((root_table_offset & 3) == 0 && "aligned");
 
-         nir_def *addr = load_root(b, intrin->def.num_components, 64u,
-                                   nir_imm_int(b, root_table_offset), 4);
+         nir_def *addr = load_per_draw(b, intrin->def.num_components, 64u,
+                                       nir_imm_int(b, root_table_offset), 4);
 
          nir_def *val = nir_load_global(b, 1u, intrin->def.bit_size, addr);
 

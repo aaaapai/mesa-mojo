@@ -482,11 +482,9 @@ struct fd_dev_info {
        * being able to avoid setting ij_linear_sample for FragFace/FragCoord.
        */
       bool has_implicit_fragface_fragcoord_ij_linear;
-      /* If GMEM needs to be disabled for this GPU */
-      bool disable_gmem;
 
-      /* GMEM size in bytes */
-      uint32_t gmem_size;
+      uint32_t max_texel_buffer_range_elements;
+      uint32_t max_storage_buffer_range_bytes;
    } props;
 };
 

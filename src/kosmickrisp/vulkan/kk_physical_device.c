@@ -116,6 +116,7 @@ kk_get_device_extensions(const struct kk_instance *instance,
       .EXT_ycbcr_2plane_444_formats = true,
 
       /* Vulkan 1.4 */
+      .KHR_dynamic_rendering_local_read = true,
       .KHR_global_priority = true,
       .KHR_line_rasterization = true,
       .KHR_index_type_uint8 = true,
@@ -149,6 +150,7 @@ kk_get_device_extensions(const struct kk_instance *instance,
       .KHR_shader_untyped_pointers = true,
 #ifdef KK_USE_WSI_PLATFORM
       .KHR_swapchain = true,
+      .KHR_swapchain_maintenance1 = true,
       .KHR_swapchain_mutable_format = true,
 #endif
       .KHR_unified_image_layouts = true,
@@ -165,6 +167,7 @@ kk_get_device_extensions(const struct kk_instance *instance,
       .EXT_extended_dynamic_state3 = true,
       .EXT_external_memory_metal = true,
       .EXT_external_memory_host = true,
+      .EXT_hdr_metadata = true,
       .EXT_image_2d_view_of_3d = true,
       .EXT_load_store_op_none = true,
       .EXT_memory_budget = true,
@@ -175,10 +178,14 @@ kk_get_device_extensions(const struct kk_instance *instance,
       .EXT_primitive_restart_index = true,
       .EXT_primitive_topology_list_restart = true,
       .EXT_robustness2 = true,
+      .EXT_sample_locations = true,
       .EXT_shader_atomic_float = true,
       .EXT_shader_replicated_composites = true,
       .EXT_shader_subgroup_ballot = true,
       .EXT_shader_subgroup_vote = true,
+#ifdef KK_USE_WSI_PLATFORM
+      .EXT_swapchain_maintenance1 = true,
+#endif
       .EXT_vertex_attribute_robustness = true,
 
       .GOOGLE_decorate_string = true,
@@ -227,6 +234,7 @@ kk_get_device_features(
       .shaderStorageImageExtendedFormats = true,
       .shaderStorageImageReadWithoutFormat = true,
       .shaderStorageImageWriteWithoutFormat = true,
+      .shaderTessellationAndGeometryPointSize = true,
       .shaderUniformBufferArrayDynamicIndexing = true,
       .tessellationShader = true,
       .textureCompressionASTC_LDR = true,
@@ -317,6 +325,7 @@ kk_get_device_features(
 
       /* Vulkan 1.4 */
       .bresenhamLines = true,
+      .dynamicRenderingLocalRead = true,
       .globalPriorityQuery = true,
       .hostImageCopy = true,
       .indexTypeUint8 = true,
@@ -366,6 +375,11 @@ kk_get_device_features(
       /* VK_KHR_shader_untyped_pointers */
       .shaderUntypedPointers = true,
 
+#ifdef KK_USE_WSI_PLATFORM
+      /* VK_KHR_swapchain_maintenance1 */
+      .swapchainMaintenance1 = true,
+#endif
+
       /* VK_KHR_unified_image_layouts */
       .unifiedImageLayouts = true,
       .unifiedImageLayoutsVideo = false,
@@ -403,6 +417,7 @@ kk_get_device_features(
       .extendedDynamicState3DepthClampEnable = true,
       .extendedDynamicState3DepthClipNegativeOneToOne = true,
       .extendedDynamicState3LineRasterizationMode = true,
+      .extendedDynamicState3SampleLocationsEnable = true,
       .extendedDynamicState3TessellationDomainOrigin = true,
 
       /* EXT_image_2d_view_of_3d */
@@ -464,10 +479,10 @@ kk_get_device_properties(const struct kk_physical_device *pdev,
       /* Vulkan 1.0 limits */
       /* Values taken from Apple7
          https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf */
-      .maxImageDimension1D = kk_image_max_dimension(VK_IMAGE_TYPE_2D),
-      .maxImageDimension2D = kk_image_max_dimension(VK_IMAGE_TYPE_2D),
-      .maxImageDimension3D = kk_image_max_dimension(VK_IMAGE_TYPE_3D),
-      .maxImageDimensionCube = 16384,
+      .maxImageDimension1D = kk_image_max_dimension(pdev, VK_IMAGE_TYPE_1D),
+      .maxImageDimension2D = kk_image_max_dimension(pdev, VK_IMAGE_TYPE_2D),
+      .maxImageDimension3D = kk_image_max_dimension(pdev, VK_IMAGE_TYPE_3D),
+      .maxImageDimensionCube = kk_image_max_dimension(pdev, VK_IMAGE_TYPE_2D),
       .maxImageArrayLayers = 2048,
       .maxTexelBufferElements = 16384 * 16384,
       .maxUniformBufferRange = 65536,
@@ -613,8 +628,8 @@ kk_get_device_properties(const struct kk_physical_device *pdev,
       .conformanceVersion = (VkConformanceVersion){1, 4, 3, 2},
       .denormBehaviorIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE,
       .roundingModeIndependence = VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE,
-      .shaderSignedZeroInfNanPreserveFloat16 = false,
-      .shaderSignedZeroInfNanPreserveFloat32 = false,
+      .shaderSignedZeroInfNanPreserveFloat16 = true,
+      .shaderSignedZeroInfNanPreserveFloat32 = true,
       .shaderSignedZeroInfNanPreserveFloat64 = false,
       .shaderDenormPreserveFloat16 = false,
       .shaderDenormPreserveFloat32 = false,
@@ -696,7 +711,7 @@ kk_get_device_properties(const struct kk_physical_device *pdev,
       /* VK_EXT_extended_dynamic_state3 */
       .dynamicPrimitiveTopologyUnrestricted = false,
 
-      /* VK_EXT_external_memory_metal */
+      /* VK_EXT_external_memory_host */
       .minImportedHostPointerAlignment = os_page_size,
 
       /* VK_EXT_graphics_pipeline_library */
@@ -775,12 +790,13 @@ kk_get_device_properties(const struct kk_physical_device *pdev,
       .robustUniformBufferAccessSizeAlignment = KK_MIN_UBO_ALIGNMENT,
 
       /* VK_EXT_sample_locations */
-      .sampleLocationSampleCounts = sample_counts,
+      /* Metal does not support sample positions for single sample */
+      .sampleLocationSampleCounts = sample_counts & ~VK_SAMPLE_COUNT_1_BIT,
       .maxSampleLocationGridSize = (VkExtent2D){1, 1},
-      .sampleLocationCoordinateRange[0] = 0.0f,
-      .sampleLocationCoordinateRange[1] = 0.9375f,
+      .sampleLocationCoordinateRange[0] = KK_MIN_SAMPLE_LOCATION,
+      .sampleLocationCoordinateRange[1] = KK_MAX_SAMPLE_LOCATION,
       .sampleLocationSubPixelBits = 4,
-      .variableSampleLocations = false,
+      .variableSampleLocations = true,
 
       /* VK_EXT_shader_object */
       .shaderBinaryVersion = 0,
@@ -832,6 +848,7 @@ kk_get_device_properties(const struct kk_physical_device *pdev,
       VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
       VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT,
       VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT,
+      VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ,
    };
 
    properties->pCopySrcLayouts = (VkImageLayout *)supported_layouts;
@@ -995,6 +1012,8 @@ get_metal_limits(struct kk_physical_device *pdev)
       mtl_device_max_threadgroup_memory_length(pdev->mtl_dev_handle);
    pdev->info.max_buffer_size =
       mtl_device_max_buffer_length(pdev->mtl_dev_handle);
+   pdev->info.gpu_apple_family =
+      mtl_device_get_gpu_apple_family(pdev->mtl_dev_handle);
 
    pdev->supported_sample_counts = VK_SAMPLE_COUNT_1_BIT;
    for (uint32_t sample_count = VK_SAMPLE_COUNT_2_BIT;
