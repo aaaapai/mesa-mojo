@@ -474,13 +474,10 @@ struct fd_dev_info {
        * expected:
        */
       bool has_salu_int_narrowing_quirk;
-
       /* Whether the device supports the image processing opcode */
       bool has_image_processing;
-
       /* The amount of valid draw state IDs. */
       uint32_t max_draw_states;
-
       /* Whether GRAS_CL_INTERP_CNTL has FACENESS/CENTERRHW and thus
        * being able to avoid setting ij_linear_sample for FragFace/FragCoord.
        */

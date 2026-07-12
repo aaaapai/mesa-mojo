@@ -895,7 +895,20 @@ loader_open_driver_lib(const char *driver_name,
       len = next - p;
       snprintf(path, sizeof(path), "%.*s/%s%s.so", len,
                p, driver_name, lib_suffix);
-      driver = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+      driver = dlopen(path, RTLD_NOLOAD);
+      if (driver == NULL) {
+         snprintf(path, sizeof(path), "%.*s/lib%s%s.so", len,
+                  p, driver_name, lib_suffix);
+         driver = dlopen(path, RTLD_NOLOAD);
+      }
+      if (driver == NULL) {
+         snprintf(path, sizeof(path), "%.*s/%s%s.so", len,
+                  p, driver_name, lib_suffix);
+         driver = dlopen(path, RTLD_NOW | RTLD_GLOBAL);
+         if (driver == NULL) {
+            driver = dlopen("libgallium_dri.so", RTLD_NOW | RTLD_GLOBAL);
+         }
+      }
       if (driver == NULL) {
          dl_error = dlerror();
          log_(_LOADER_DEBUG, "MESA-LOADER: failed to open %s: %s\n",

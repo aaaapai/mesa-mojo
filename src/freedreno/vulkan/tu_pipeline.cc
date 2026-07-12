@@ -1743,6 +1743,15 @@ tu_pipeline_builder_compile_shaders(struct tu_pipeline_builder *builder,
    };
    VkPipelineCreationFeedback stage_feedbacks[MESA_SHADER_STAGES] = { 0 };
 
+   /* === ДОБАВЛЕНО: Идентификация GPU Adreno 8xx === */
+   const uint64_t chip_id = builder->device->physical_device->dev_id.chip_id;
+   const bool is_a810 = chip_id == 0x44010000ull;
+   const bool is_a825 = chip_id == 0x44030000ull;
+   const bool is_a829 = chip_id == 0x44030A20ull;
+   const bool is_a830 = chip_id == 0x44050001ull || chip_id == 0x43050A31ull;
+   const bool disable_fdm_msaa = is_a810 || is_a825 || is_a829 || is_a830;
+   /* === КОНЕЦ ДОБАВЛЕНИЯ === */
+
    const bool executable_info =
       builder->create_flags &
       VK_PIPELINE_CREATE_2_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR;
@@ -1903,7 +1912,8 @@ tu_pipeline_builder_compile_shaders(struct tu_pipeline_builder *builder,
          }
       }
 
-      keys[last_pre_rast_stage].fdm_per_layer = builder->fdm_per_layer;
+      keys[last_pre_rast_stage].fdm_per_layer =
+         disable_fdm_msaa ? false : builder->fdm_per_layer;
    }
 
    if (builder->state & VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT) {
@@ -1912,7 +1922,7 @@ tu_pipeline_builder_compile_shaders(struct tu_pipeline_builder *builder,
       keys[MESA_SHADER_FRAGMENT].fragment_density_map =
          builder->fragment_density_map;
       keys[MESA_SHADER_FRAGMENT].fdm_per_layer =
-         builder->fdm_per_layer;
+         disable_fdm_msaa ? false : builder->fdm_per_layer;
       keys[MESA_SHADER_FRAGMENT].max_fdm_layers = builder->max_fdm_layers;
       keys[MESA_SHADER_FRAGMENT].unscaled_input_fragcoord =
          builder->unscaled_input_fragcoord;
@@ -1945,7 +1955,7 @@ tu_pipeline_builder_compile_shaders(struct tu_pipeline_builder *builder,
        * tu_shader_key::force_sample_interp in a bit.
        */
       keys[MESA_SHADER_FRAGMENT].force_sample_interp =
-         !builder->rasterizer_discard && msaa_info && msaa_info->sampleShadingEnable;
+         disable_fdm_msaa ? false : (!builder->rasterizer_discard && msaa_info && msaa_info->sampleShadingEnable);
    }
 
    unsigned char pipeline_blake3[BLAKE3_KEY_LEN];

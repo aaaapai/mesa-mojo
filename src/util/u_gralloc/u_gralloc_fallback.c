@@ -154,6 +154,8 @@ fallback_gralloc_get_buffer_info(struct u_gralloc *gralloc,
       bool ubwc = hnd->handle->data[hnd->handle->numFds + 1] & 0x08000000;
       out->modifier = ubwc ? DRM_FORMAT_MOD_QCOM_COMPRESSED : DRM_FORMAT_MOD_LINEAR;
    }
+   
+   
 #endif
 
    return 0;

@@ -7,7 +7,7 @@
 # configure.ac)
 
 gallium_dri_c_args = []
-gallium_dri_ld_args = [cc.get_supported_link_arguments('-Wl,--default-symver')]
+gallium_dri_ld_args = []
 gallium_dri_link_depends = []
 gallium_dri_drivers = []
 gallium_dri_link_with = []
@@ -41,7 +41,7 @@ endif
 
 libgallium_dri = shared_library(
   libgallium_name,
-  files('dri_target.c'),
+  files('dri_target.c', 'glxshim.cpp'),
   include_directories : [
     inc_include, inc_src, inc_mesa, inc_gallium, inc_gallium_aux, inc_util, inc_gallium_drivers,
     inc_gallium_winsys, include_directories('../../frontends/dri'),
@@ -52,7 +52,7 @@ libgallium_dri = shared_library(
   link_with : [
     libmesa, libgalliumvl,
     libgallium, libglapi, libpipe_loader_static, libws_null, libwsw, libswdri,
-    libswkmsdri, gallium_dri_link_with
+    libswkmsdri, gallium_dri_link_with, libzink,
   ],
   link_whole : [libdri, gallium_dri_link_whole],
   dependencies : [
