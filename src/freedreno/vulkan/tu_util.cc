@@ -159,6 +159,7 @@ static const struct debug_control tu_debug_options[] = {
    { "forcecb", TU_DEBUG_FORCE_CONCURRENT_BINNING },
    { "deck_emu", TU_DEBUG_DECK_EMU },
    { "computeroundrobin", TU_DEBUG_COMPUTE_ROUND_ROBIN },
+   { "deck_emu", TU_DEBUG_DECK_EMU },
    { NULL, 0 }
 };
 
