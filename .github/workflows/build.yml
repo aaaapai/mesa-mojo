@@ -43,10 +43,8 @@ jobs:
             -Damdgpu=disabled \
             -Dnouveau=disabled \
             -Dvmwgfx=disabled \
-            -Dfreedreno=disabled \
             -Dvc4=disabled \
-            -Detnaviv=disabled \
-           -Dfreedreno-kgsl=false
+            -Detnaviv=disabled
           meson compile -C "build-android" -j 6 || (echo "=== DRM build failed, printing meson-log ===" && cat build-android/meson-logs/meson-log.txt && exit 1)
           meson install -C "build-android"
 
