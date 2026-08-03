@@ -70,7 +70,7 @@ jobs:
             -Dopengl=true \
             -Dvulkan-drivers= \
             -Dtools= \
-            -Dgallium-drivers=zink,freedreno \
+            -Dgallium-drivers=zink \
             -Dcpp_rtti=true \
             -Degl-lib-suffix=_mesa \
             -Dglvnd=disabled \
