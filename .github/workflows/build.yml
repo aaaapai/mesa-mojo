@@ -62,7 +62,7 @@ jobs:
             --cross-file "build-crossfile" \
             --buildtype release \
             -Dplatforms=android \
-            -Dplatform-sdk-version=29 \
+            -Dplatform-sdk-version=26 \
             -Dandroid-stub=true \
             -Dshared-llvm=disabled \
             -Dxlib-lease=disabled \
