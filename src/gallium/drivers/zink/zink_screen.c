@@ -1266,6 +1266,24 @@ zink_init_screen_caps(struct zink_screen *screen)
       caps->shader_subgroup_supported_features = screen->info.subgroup.supportedOperations & PIPE_SHADER_SUBGROUP_FEATURE_MASK;
       caps->shader_subgroup_quad_all_stages = screen->info.subgroup.quadOperationsInAllStages;
    }
+
+   /* Vulkan supports only 4 byte clears */
+   caps->hw_clear_buffer_sizes = 4;
+
+   switch (screen->info.props.deviceType) {
+   case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+      caps->device_type = PIPE_DEVICE_TYPE_INTEGRATED_GPU;
+      break;
+   case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+      caps->device_type = PIPE_DEVICE_TYPE_DISCRETE_GPU;
+      break;
+   case VK_PHYSICAL_DEVICE_TYPE_CPU:
+      caps->device_type = PIPE_DEVICE_TYPE_CPU;
+      break;
+   default:
+      caps->device_type = PIPE_DEVICE_TYPE_UNKNOWN;
+      break;
+   }
 }
 
 static VkSampleCountFlagBits
@@ -3595,8 +3613,6 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
       /* determine if vis vram is roughly equal to total vram */
       if (biggest_vis_vram > biggest_vram * 0.9)
          screen->resizable_bar = true;
-      if (biggest_vis_vram >= 8ULL * 1024ULL * 1024ULL * 1024ULL)
-         screen->always_cached_upload = true;
    }
 
    setup_renderdoc(screen);

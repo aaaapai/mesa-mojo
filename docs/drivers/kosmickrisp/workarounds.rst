@@ -49,6 +49,55 @@ info on what was updated.
 Workarounds
 ===========
 
+KK_WORKAROUND_16
+----------------
+| macOS version: 27.0 beta (26A5353q)
+| Metal ticket: Not reported
+| Metal ticket status:
+| CTS test failure: ``dEQP-VK.robustness.robustness2.*.sampled_image.*``
+| Comments:
+
+On M5, if a texture read uses an OOB lod, the lod is clamped to a valid one
+and the read returns data from that level rather than (0, 0, 0, 1). M1 to M4
+chips do not behave like this. Based on workarounds in the HoneyKrisp driver,
+we suspect that the Metal compiler is implementing a workaround on M1-M4
+but not yet on M5.
+
+| Log:
+| 2026-07-24: Workaround implemented
+
+
+KK_WORKAROUND_15
+----------------
+| macOS version: 27.0 beta (26A5353q)
+| Metal ticket: Not reported
+| Metal ticket status:
+| CTS test failure: ``dEQP-VK.robustness.robustness2.bind.notemplate.rgba32*i.unroll.volatile.storage_buffer*.readonly.no_fmt_qual.len_16.samples_1.1d.comp``
+| Comments:
+
+Volatile and coherent device accesses are miscompiled by the MSL compiler.
+Dropping coherent qualifier is enough to work around the compiler bug, and
+having volatile only seems to be guarantee enough. This bug is only present
+in macOS 27 with KK_WORKAROUND_6 disabled.
+
+| Log:
+| 2026-07-14: Workaround implemented
+
+KK_WORKAROUND_14
+----------------
+| macOS version: 26.5, 27.0 beta 1
+| Metal ticket status: Not reported
+| CTS test failure: dEQP-VK.spirv_assembly.instruction.*.float_controls2.fp*
+| Comments:
+
+Metal compiler will fold "NAN * 0.0" to "0.0" and "0.0 < abs(NAN)" to "true"
+even under blocks with pragma relaxed when the "0.0" value is constant even
+if relaxed mode preserves NAN values. Work around this by adding an always
+true conditional for multiplies such that "(false value) ? 1.0 : NAN * 0.0"
+and checking for NAN in conditionals such that "!isnan(x) && !isnan(y) && x == y"
+for less than, greater equal than and equal, while using OR and removing
+negation for not equal.
+
 KK_WORKAROUND_13
 ----------------
 | macOS version: 26.5, 27.0 beta 1

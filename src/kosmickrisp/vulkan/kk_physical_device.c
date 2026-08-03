@@ -7,6 +7,7 @@
 
 #include "kk_physical_device.h"
 
+#include "kk_debug.h"
 #include "kk_entrypoints.h"
 #include "kk_image.h"
 #include "kk_instance.h"
@@ -34,7 +35,7 @@ kk_get_vk_version()
    if (version_override)
       return version_override;
 
-   return VK_MAKE_VERSION(1, 3, VK_HEADER_VERSION);
+   return VK_MAKE_VERSION(1, 4, VK_HEADER_VERSION);
 }
 
 static void
@@ -126,6 +127,7 @@ kk_get_device_extensions(const struct kk_instance *instance,
       .KHR_map_memory2 = true,
       .KHR_push_descriptor = true,
       .KHR_shader_expect_assume = true,
+      .KHR_shader_float_controls2 = true,
       .KHR_shader_subgroup_rotate = true,
       .KHR_vertex_attribute_divisor = true,
       .EXT_global_priority = true,
@@ -142,6 +144,12 @@ kk_get_device_extensions(const struct kk_instance *instance,
       .KHR_maintenance8 = true,
       .KHR_maintenance9 = true,
       .KHR_maintenance10 = true,
+#ifdef KK_USE_WSI_PLATFORM
+      .KHR_present_id = true,
+      .KHR_present_id2 = true,
+      .KHR_present_wait = true,
+      .KHR_present_wait2 = true,
+#endif
       .KHR_robustness2 = true,
       .KHR_shader_fma = true,
       .KHR_shader_maximal_reconvergence = true,
@@ -159,8 +167,10 @@ kk_get_device_extensions(const struct kk_instance *instance,
       .EXT_attachment_feedback_loop_layout = true,
       .EXT_attachment_feedback_loop_dynamic_state = true,
       .EXT_blend_operation_advanced = true,
+      .EXT_border_color_swizzle = KK_EXPERIMENTAL(CUSTOM_BORDER),
       .EXT_calibrated_timestamps = true,
       .EXT_conditional_rendering = true,
+      .EXT_custom_border_color = KK_EXPERIMENTAL(CUSTOM_BORDER),
       .EXT_custom_resolve = true,
       .EXT_debug_marker = true,
       .EXT_depth_clip_control = true,
@@ -333,6 +343,7 @@ kk_get_device_features(
       .maintenance6 = true,
       .pipelineRobustness = true,
       .pushDescriptor = true,
+      .shaderFloatControls2 = true,
       .shaderSubgroupRotate = true,
       .shaderSubgroupRotateClustered = true,
       .vertexAttributeInstanceRateDivisor = true,
@@ -352,6 +363,20 @@ kk_get_device_features(
 
       /* VK_KHR_maintenance10 */
       .maintenance10 = true,
+
+#ifdef KK_USE_WSI_PLATFORM
+      /* VK_KHR_present_id */
+      .presentId = true,
+
+      /* VK_KHR_present_id2 */
+      .presentId2 = true,
+
+      /* VK_KHR_present_wait */
+      .presentWait = true,
+
+      /* VK_KHR_present_wait2 */
+      .presentWait2 = true,
+#endif
 
       /* VK_KHR_robustness2 */
       .robustBufferAccess2 = true,
@@ -403,9 +428,18 @@ kk_get_device_features(
       /* VK_EXT_blend_operation_advanced */
       .advancedBlendCoherentOperations = true,
 
+      /* VK_EXT_border_color_swizzle */
+      .borderColorSwizzle = supported_extensions->EXT_border_color_swizzle,
+      .borderColorSwizzleFromImage = false,
+
       /* VK_EXT_conditional_rendering */
       .conditionalRendering = true,
       .inheritedConditionalRendering = true,
+
+      /* VK_EXT_custom_border_color */
+      .customBorderColors = supported_extensions->EXT_custom_border_color,
+      .customBorderColorWithoutFormat =
+         supported_extensions->EXT_custom_border_color,
 
       /* VK_EXT_custom_resolve */
       .customResolve = true,
@@ -463,10 +497,16 @@ kk_get_device_properties(const struct kk_physical_device *pdev,
                          const struct kk_instance *instance,
                          struct vk_properties *properties)
 {
-   VkSampleCountFlags sample_counts = pdev->supported_sample_counts;
+   VkSampleCountFlags sample_counts = pdev->info.supported_sample_counts;
 
    uint64_t os_page_size = 4096;
    os_get_page_size(&os_page_size);
+
+   // Queries the frequency of the GPU timestamp in ticks per second.
+   uint64_t timestamp_frequency =
+      mtl_device_timestamp_frequency(pdev->mtl_dev_handle);
+   float timestamp_period =
+      timestamp_frequency ? (1000000000.0f / (float)timestamp_frequency) : 1.0f;
 
    *properties = (struct vk_properties){
       .apiVersion = kk_get_vk_version(),
@@ -570,10 +610,10 @@ kk_get_device_properties(const struct kk_physical_device *pdev,
       .sampledImageIntegerSampleCounts = sample_counts,
       .sampledImageDepthSampleCounts = sample_counts,
       .sampledImageStencilSampleCounts = sample_counts,
-      .storageImageSampleCounts = sample_counts,
+      .storageImageSampleCounts = VK_SAMPLE_COUNT_1_BIT,
       .maxSampleMaskWords = 1,
-      .timestampComputeAndGraphics = false,
-      .timestampPeriod = 1,
+      .timestampComputeAndGraphics = true,
+      .timestampPeriod = timestamp_period,
       .maxClipDistances = 8,
       .maxCullDistances = 8,
       .maxCombinedClipAndCullDistances = 8,
@@ -637,8 +677,8 @@ kk_get_device_properties(const struct kk_physical_device *pdev,
       .shaderDenormFlushToZeroFloat16 = false,
       .shaderDenormFlushToZeroFloat32 = false,
       .shaderDenormFlushToZeroFloat64 = false,
-      .shaderRoundingModeRTEFloat16 = false,
-      .shaderRoundingModeRTEFloat32 = false,
+      .shaderRoundingModeRTEFloat16 = true,
+      .shaderRoundingModeRTEFloat32 = true,
       .shaderRoundingModeRTEFloat64 = false,
       .shaderRoundingModeRTZFloat16 = false,
       .shaderRoundingModeRTZFloat32 = false,
@@ -1012,16 +1052,27 @@ get_metal_limits(struct kk_physical_device *pdev)
       mtl_device_max_threadgroup_memory_length(pdev->mtl_dev_handle);
    pdev->info.max_buffer_size =
       mtl_device_max_buffer_length(pdev->mtl_dev_handle);
+   pdev->info.max_sampler_count =
+      mtl_device_max_argument_buffer_sampler_count(pdev->mtl_dev_handle);
    pdev->info.gpu_apple_family =
       mtl_device_get_gpu_apple_family(pdev->mtl_dev_handle);
 
-   pdev->supported_sample_counts = VK_SAMPLE_COUNT_1_BIT;
+   /* See Metal Feature Set Tables. Note that for certain MSAA sample counts the
+    * tile size will actually be restricted to a width and/or height of 16, but
+    * we typically don't know the actual sample count when querying granularity
+    * or checking render area alignment. Use 32x32 always as a best effort
+    * optimal rendering area, which will also ensure proper alignment for 16
+    * wide/tall tiles chosen by Metal. */
+   pdev->info.rendering_tile_width = 32;
+   pdev->info.rendering_tile_height = 32;
+
+   pdev->info.supported_sample_counts = VK_SAMPLE_COUNT_1_BIT;
    for (uint32_t sample_count = VK_SAMPLE_COUNT_2_BIT;
         sample_count <= VK_SAMPLE_COUNT_8_BIT; sample_count <<= 1) {
       if (mtl_device_supports_sample_count(pdev->mtl_dev_handle, sample_count))
-         pdev->supported_sample_counts |= sample_count;
+         pdev->info.supported_sample_counts |= sample_count;
    }
-   assert(pdev->supported_sample_counts <= (KK_MAX_SAMPLES << 1) - 1);
+   assert(pdev->info.supported_sample_counts <= (KK_MAX_SAMPLES << 1) - 1);
 }
 
 VkResult
@@ -1235,8 +1286,7 @@ kk_GetPhysicalDeviceQueueFamilyProperties2(
       {
          p->queueFamilyProperties.queueFlags = queue_family->queue_flags;
          p->queueFamilyProperties.queueCount = queue_family->queue_count;
-         p->queueFamilyProperties.timestampValidBits =
-            0; /* TODO_KOSMICKRISP Timestamp queries */
+         p->queueFamilyProperties.timestampValidBits = 64;
          p->queueFamilyProperties.minImageTransferGranularity =
             (VkExtent3D){1, 1, 1};
 

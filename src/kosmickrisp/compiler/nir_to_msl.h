@@ -8,6 +8,8 @@
 
 #include "nir.h"
 
+#define MSL_MAX_SAMPLERS 4096
+
 enum pipe_format;
 
 struct nir_to_msl_options {
@@ -68,6 +70,8 @@ bool msl_nir_fs_remove_depth_write(nir_builder *b, nir_intrinsic_instr *intrin,
                                    void *data);
 
 bool msl_lower_textures(nir_shader *s);
+
+bool msl_lower_robustness2_images(nir_shader *s);
 
 bool msl_lower_static_sample_mask(nir_shader *nir, uint32_t sample_mask);
 bool msl_ensure_depth_write(nir_shader *nir);

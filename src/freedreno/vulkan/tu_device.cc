@@ -77,18 +77,41 @@ tu_device_get_build_id(blake3_hasher *ctx)
 #endif
 }
 
-static int
-tu_device_get_cache_uuid(struct tu_physical_device *device, void *uuid)
+static void
+tu_physical_device_compiler_options_init(struct tu_physical_device *device,
+                                         struct tu_instance *instance)
 {
-   blake3_hasher ctx;
-   unsigned char blake3[BLAKE3_KEY_LEN];
+   /* D3D12 texel buffer range emulation requires the resbase instruction, which appeared in 7xx. */
+   if (fd_dev_gen(&device->dev_id) >= 7) {
+      if (device->info->props.max_texel_buffer_range_elements < TU_D3D12_MAX_TEXEL_BUFFER_ELEMENTS) {
+         assert(fd_dev_gen(&device->dev_id) == 7);
+         device->compiler_options.enable_texel_buffer_emulation =
+            instance->drirc.misc.enable_texel_buffer_emulation;
+      }
+      if (device->info->props.max_storage_buffer_range_bytes < TU_D3D12_MAX_STORAGE_BUFFER_RANGE_BYTES) {
+         assert(fd_dev_gen(&device->dev_id) == 7);
+         device->compiler_options.enable_ssbo_emulation =
+            instance->drirc.misc.enable_ssbo_emulation;
+      }
+   }
+
+   device->compiler_options.allow_oob_indirect_ubo_loads =
+      device->instance->drirc.misc.allow_oob_indirect_ubo_loads;
+
    /* Note: IR3_SHADER_DEBUG also affects compilation, but it's not
     * initialized until after compiler creation so we have to add it to the
     * shader hash instead, since the compiler is only created with the logical
     * device.
     */
-   uint64_t driver_flags = TU_DEBUG(NOMULTIPOS) |
-      (TU_DEBUG(COMPUTE_ROUND_ROBIN) << 1u);
+   device->compiler_options.no_multi_pos = TU_DEBUG(NOMULTIPOS);
+   device->compiler_options.compute_round_robin = TU_DEBUG(COMPUTE_ROUND_ROBIN);
+}
+
+static int
+tu_device_get_cache_uuid(struct tu_physical_device *device, void *uuid)
+{
+   blake3_hasher ctx;
+   unsigned char blake3[BLAKE3_KEY_LEN];
 
    /* Note: we intentionally drop the upper 32 bits since they contain fuse
     * values that don't affect compilation.
@@ -102,14 +125,9 @@ tu_device_get_cache_uuid(struct tu_physical_device *device, void *uuid)
       return -1;
 
    _mesa_blake3_update(&ctx, &chip_id, sizeof(chip_id));
-   _mesa_blake3_update(&ctx, &driver_flags, sizeof(driver_flags));
    _mesa_blake3_update(&ctx, &device->uche_trap_base, sizeof(device->uche_trap_base));
-   _mesa_blake3_update(&ctx, &device->instance->drirc.misc.allow_oob_indirect_ubo_loads,
-                       sizeof(device->instance->drirc.misc.allow_oob_indirect_ubo_loads));
-   _mesa_blake3_update(&ctx, &device->enable_texel_buffer_emulation,
-                       sizeof(device->enable_texel_buffer_emulation));
-   _mesa_blake3_update(&ctx, &device->enable_ssbo_emulation,
-                       sizeof(device->enable_ssbo_emulation));
+   _mesa_blake3_update(&ctx, &device->compiler_options,
+                       sizeof(device->compiler_options));
    _mesa_blake3_final(&ctx, blake3);
 
    memcpy(uuid, blake3, VK_UUID_SIZE);
@@ -241,7 +259,7 @@ get_device_extensions(const struct tu_physical_device *device,
       .KHR_incremental_present = true,
 #endif
       .KHR_index_type_uint8 = true,
-      .KHR_internally_synchronized_queues = true,
+      .KHR_internally_synchronized_queues = tu_is_vk_1_1(device),
       .KHR_line_rasterization = !device->info->props.is_a702,
       .KHR_load_store_op_none = true,
       .KHR_maintenance1 = true,
@@ -362,6 +380,7 @@ get_device_extensions(const struct tu_physical_device *device,
 #ifdef TU_USE_WSI_PLATFORM
       .EXT_present_timing = device->info->props.has_persistent_counter,
 #endif
+      .EXT_primitive_restart_index = true,
       .EXT_primitive_topology_list_restart = true,
       .EXT_primitives_generated_query = true,
       .EXT_private_data = true,
@@ -412,7 +431,7 @@ get_device_extensions(const struct tu_physical_device *device,
       .QCOM_multiview_per_view_viewports =
          device->info->props.has_per_view_viewport,
       .QCOM_render_pass_shader_resolve = true,
-      .VALVE_fragment_density_map_layered = true,
+      .VALVE_fragment_density_map_layered = tu_is_vk_1_1(device),
       .VALVE_mutable_descriptor_type = true,
    } };
 }
@@ -711,7 +730,7 @@ tu_get_features(struct tu_physical_device *pdevice,
    /* VK_EXT_extended_dynamic_state2 */
    features->extendedDynamicState2 = true;
    features->extendedDynamicState2LogicOp = true;
-   features->extendedDynamicState2PatchControlPoints = true;
+   features->extendedDynamicState2PatchControlPoints = !pdevice->info->props.is_a702;
 
    /* VK_EXT_extended_dynamic_state3 */
    features->extendedDynamicState3PolygonMode = true;
@@ -801,6 +820,9 @@ tu_get_features(struct tu_physical_device *pdevice,
 
    /* VK_EXT_pipeline_robustness */
    features->pipelineRobustness = true;
+
+   /* VK_EXT_primitive_restart_index */
+   features->primitiveRestartIndex = true;
 
    /* VK_EXT_primitive_topology_list_restart */
    features->primitiveTopologyListRestart = true;
@@ -1162,12 +1184,12 @@ tu_get_properties(struct tu_physical_device *pdevice,
    props->maxImageDimension3D = (1 << 11);
    props->maxImageDimensionCube = (1 << 14);
    props->maxImageArrayLayers = (1 << (pdevice->info->props.is_a702 ? 8 : 11));
-   props->maxTexelBufferElements = pdevice->enable_texel_buffer_emulation
+   props->maxTexelBufferElements = pdevice->compiler_options.enable_texel_buffer_emulation
                                       ? TU_D3D12_MAX_TEXEL_BUFFER_ELEMENTS
                                       : pdevice->info->props.max_texel_buffer_range_elements;
    props->maxUniformBufferRange = MAX_UNIFORM_BUFFER_RANGE;
    props->maxStorageBufferRange =
-      pdevice->enable_ssbo_emulation
+      pdevice->compiler_options.enable_ssbo_emulation
          ? TU_D3D12_MAX_STORAGE_BUFFER_RANGE_BYTES
          : pdevice->info->props.max_storage_buffer_range_bytes;
    props->maxPushConstantsSize = MAX_PUSH_CONSTANTS_SIZE;
@@ -1211,9 +1233,7 @@ tu_get_properties(struct tu_physical_device *pdevice,
       props->maxGeometryOutputVertices = 256;
       props->maxGeometryTotalOutputComponents = 1024;
    }
-   // probably should be props->maxVertexOutputComponents - 4 but that is
-   // below the limit on a702
-   props->maxFragmentInputComponents = pdevice->info->props.is_a702 ? 112 : 124;
+   props->maxFragmentInputComponents = pdevice->info->props.is_a702 ? 64 : 128;
    props->maxFragmentOutputAttachments = 8;
    props->maxFragmentDualSrcAttachments = 1;
    props->maxFragmentCombinedOutputResources = MAX_RTS + max_descriptor_set_size * 2;
@@ -1764,17 +1784,7 @@ tu_physical_device_init(struct tu_physical_device *device,
       goto fail_free_name;
    }
 
-   /* D3D12 texel buffer range emulation requires the resbase instruction, which appeared in 7xx. */
-   if (fd_dev_gen(&device->dev_id) >= 7) {
-      if (device->info->props.max_texel_buffer_range_elements < TU_D3D12_MAX_TEXEL_BUFFER_ELEMENTS) {
-         assert(fd_dev_gen(&device->dev_id) == 7);
-         device->enable_texel_buffer_emulation = instance->drirc.misc.enable_texel_buffer_emulation;
-      }
-      if (device->info->props.max_storage_buffer_range_bytes < TU_D3D12_MAX_STORAGE_BUFFER_RANGE_BYTES) {
-         assert(fd_dev_gen(&device->dev_id) == 7);
-         device->enable_ssbo_emulation = instance->drirc.misc.enable_ssbo_emulation;
-      }
-   }
+   tu_physical_device_compiler_options_init(device, instance);
 
    if (tu_device_get_cache_uuid(device, device->cache_uuid)) {
       result = vk_startup_errorf(instance, VK_ERROR_INITIALIZATION_FAILED,
@@ -2695,7 +2705,9 @@ static VkResult
 tu_init_cmdbuf_start_a725_quirk(struct tu_device *device)
 {
    struct tu_cs shader_cs;
-   tu_cs_begin_sub_stream(&device->sub_cs, 10, &shader_cs);
+   VkResult result = tu_cs_begin_sub_stream(&device->sub_cs, 10, &shader_cs);
+   if (result != VK_SUCCESS)
+      return result;
 
    uint32_t raw_shader[] = {
       0x00040000, 0x40600000, // mul.f hr0.x, hr0.x, hr1.x
@@ -2707,10 +2719,14 @@ tu_init_cmdbuf_start_a725_quirk(struct tu_device *device)
 
    tu_cs_emit_array(&shader_cs, raw_shader, ARRAY_SIZE(raw_shader));
    struct tu_cs_entry shader_entry = tu_cs_end_sub_stream(&device->sub_cs, &shader_cs);
+   if (!shader_entry.bo)
+      return tu_cs_get_status(&device->sub_cs);
    uint64_t shader_iova = shader_entry.bo->iova + shader_entry.offset;
 
    struct tu_cs sub_cs;
-   tu_cs_begin_sub_stream(&device->sub_cs, 47, &sub_cs);
+   result = tu_cs_begin_sub_stream(&device->sub_cs, 47, &sub_cs);
+   if (result != VK_SUCCESS)
+      return result;
 
    tu_cs_emit_regs(&sub_cs, SP_UPDATE_CNTL(A7XX,
             .vs_state = true, .hs_state = true, .ds_state = true,
@@ -3827,7 +3843,7 @@ tu_AllocateMemory(VkDevice _device,
 
       result = TU_CALLX(device, tu_image_init)(
          device, mem->image, mem->image->vk.android_deferred_create_info,
-         eci.drmFormatModifier, a_plane_layouts);
+         eci.drmFormatModifier, a_plane_layouts, TU_IMAGE_ID_ASSIGN);
       if (result != VK_SUCCESS) {
          vk_device_memory_destroy(&device->vk, pAllocator, &mem->vk);
          return result;
@@ -4093,7 +4109,8 @@ tu_init_msrtss_attachments(struct tu_device *device,
        */
       vk_image_init(&device->vk, &images[i].vk, &image_info);
 
-      TU_CALLX(device, tu_image_init)(device, &images[i], &image_info, DRM_FORMAT_MOD_INVALID, NULL);
+      TU_CALLX(device, tu_image_init)(device, &images[i], &image_info, DRM_FORMAT_MOD_INVALID, NULL,
+                                      TU_IMAGE_ID_INTERNAL);
 
       if (is_ds) {
          depth_size = align64(depth_size, images[i].layout[0].base_align);

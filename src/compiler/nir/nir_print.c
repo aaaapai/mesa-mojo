@@ -1475,6 +1475,9 @@ print_intrinsic_instr(nir_intrinsic_instr *instr, print_state *state)
          if (instr->intrinsic == nir_intrinsic_quad_swizzle_amd) {
             for (unsigned i = 0; i < 4; i++)
                fprintf(fp, "%d", (mask >> (i * 2) & 3));
+         } else if (instr->intrinsic == nir_intrinsic_dpp8_swizzle_amd) {
+            for (unsigned i = 0; i < 8; i++)
+               fprintf(fp, "%d", (mask >> (i * 3) & 0x7));
          } else if (instr->intrinsic == nir_intrinsic_masked_swizzle_amd) {
             fprintf(fp, "((id & %d) | %d) ^ %d", mask & 0x1F,
                     (mask >> 5) & 0x1F,
@@ -2242,6 +2245,10 @@ get_cmat_call_op_str(nir_cmat_call_op op)
       return "cmat_call_reduce_2x2";
    case nir_cmat_call_op_per_element_op:
       return "cmat_call_per_element";
+   case nir_cmat_call_op_tensor_load:
+      return "cmat_call_tensor_load";
+   case nir_cmat_call_op_tensor_store:
+      return "cmat_call_tensor_store";
    }
    UNREACHABLE("Unknown cmat call op");
 }
@@ -2253,13 +2260,13 @@ print_cmat_call_instr(nir_cmat_call_instr *instr, print_state *state)
 
    print_no_dest_padding(state);
 
-   fprintf(fp, "%s %s ", get_cmat_call_op_str(instr->op), instr->callee->name);
+   fprintf(fp, "%s %s ", get_cmat_call_op_str(instr->op), instr->callee ? instr->callee->name : "");
 
    for (unsigned i = 0; i < instr->num_params; i++) {
       if (i != 0)
          fprintf(fp, ", ");
 
-      if (instr->callee->params[i].name)
+      if (instr->callee && instr->callee->params[i].name)
          fprintf(fp, "%s ", instr->callee->params[i].name);
 
       print_src(&instr->params[i], state, nir_type_invalid);
@@ -2886,6 +2893,9 @@ print_shader_info(const struct shader_info *info, FILE *fp)
 
    if (info->label)
       fprintf(fp, "label: %s\n", info->label);
+
+   if (info->spec)
+      fprintf(fp, "%s", info->spec);
 
    print_nz_bool(fp, "internal", info->internal);
 

@@ -1471,9 +1471,6 @@ iris_init_render_context(struct iris_batch *batch)
       INTEL_SAMPLE_POS_2X(pat._2xSample);
       INTEL_SAMPLE_POS_4X(pat._4xSample);
       INTEL_SAMPLE_POS_8X(pat._8xSample);
-#if GFX_VER >= 9
-      INTEL_SAMPLE_POS_16X(pat._16xSample);
-#endif
    }
 
    /* Use the legacy AA line coverage computation. */
@@ -2287,7 +2284,7 @@ get_line_width(const struct pipe_rasterizer_state *state)
    if (!state->multisample && !state->line_smooth)
       line_width = roundf(state->line_width);
 
-   if (!state->multisample && state->line_smooth && line_width < 1.5f) {
+   if (!state->multisample && line_width < 1.5f) {
       /* For 1 pixel line thickness or less, the general anti-aliasing
        * algorithm gives up, and a garbage line is generated.  Setting a
        * Line Width of 0.0 specifies the rasterization of the "thinnest"
@@ -3670,10 +3667,10 @@ iris_set_sample_mask(struct pipe_context *ctx, unsigned sample_mask)
 {
    struct iris_context *ice = (struct iris_context *) ctx;
 
-   /* We only support 16x MSAA, so we have 16 bits of sample maks.
+   /* We only support up to 8x MSAA, so we have 8 bits of sample mask.
     * st/mesa may pass us 0xffffffff though, meaning "enable all samples".
     */
-   ice->state.sample_mask = sample_mask & 0xffff;
+   ice->state.sample_mask = sample_mask & 0xff;
    ice->state.dirty |= IRIS_DIRTY_SAMPLE_MASK;
 }
 
@@ -3831,11 +3828,6 @@ iris_set_framebuffer_state(struct pipe_context *ctx,
 
    if (cso->samples != samples) {
       ice->state.dirty |= IRIS_DIRTY_MULTISAMPLE;
-
-      /* We need to toggle 3DSTATE_PS::32 Pixel Dispatch Enable */
-      if (GFX_VER >= 9 && GFX_VER < 30 &&
-          (cso->samples == 16 || samples == 16))
-         ice->state.stage_dirty |= IRIS_STAGE_DIRTY_FS;
 
       /* We may need to emit blend state for Wa_14018912822. */
       if ((cso->samples > 1) != (samples > 1) &&
@@ -5080,7 +5072,8 @@ iris_store_vs_state(const struct iris_screen *screen,
       vs.UserClipDistanceCullTestEnableBitmask =
          vue_data->cull_distance_mask;
 #if GFX_VER >= 30
-      vs.RegistersPerThread = ptl_register_blocks(shader->brw_prog_data->grf_used);
+      vs.RegistersPerThread =
+         brw_register_blocks(devinfo, shader->brw_prog_data->grf_used);
 #endif
    }
 }
@@ -5130,7 +5123,8 @@ iris_store_tcs_state(const struct iris_screen *screen,
 #endif
 
 #if GFX_VER >= 30
-      hs.RegistersPerThread = ptl_register_blocks(shader->brw_prog_data->grf_used);
+      hs.RegistersPerThread =
+         brw_register_blocks(devinfo, shader->brw_prog_data->grf_used);
 #endif
    }
 }
@@ -5164,7 +5158,8 @@ iris_store_tes_state(const struct iris_screen *screen,
          vue_data->cull_distance_mask;
 
 #if GFX_VER >= 30
-      ds.RegistersPerThread = ptl_register_blocks(shader->brw_prog_data->grf_used);
+      ds.RegistersPerThread =
+         brw_register_blocks(devinfo, shader->brw_prog_data->grf_used);
 #endif
    }
 
@@ -5247,7 +5242,8 @@ iris_store_gs_state(const struct iris_screen *screen,
       gs.VertexURBEntryOutputLength = MAX2(urb_entry_output_length, 1);
 
 #if GFX_VER >= 30
-      gs.RegistersPerThread = ptl_register_blocks(shader->brw_prog_data->grf_used);
+      gs.RegistersPerThread =
+         brw_register_blocks(devinfo, shader->brw_prog_data->grf_used);
 #endif
    }
 }
@@ -5279,7 +5275,8 @@ iris_store_fs_state(const struct iris_screen *screen,
 #endif
 
 #if GFX_VER >= 30
-      ps.RegistersPerThread = ptl_register_blocks(shader->brw_prog_data->grf_used);
+      ps.RegistersPerThread =
+         brw_register_blocks(devinfo, shader->brw_prog_data->grf_used);
 #endif
 
       /* From the documentation for this packet:
@@ -5378,8 +5375,9 @@ iris_store_cs_state(const struct iris_screen *screen,
       desc.ThreadPreemptionDisable = true;
 #endif
 #if GFX_VER >= 30
-      desc.RegistersPerThread = ptl_register_blocks(
-         shader->brw_prog_data->grf_used);
+      desc.RegistersPerThread =
+         brw_register_blocks(screen->devinfo,
+                             shader->brw_prog_data->grf_used);
 #endif
    }
 }
@@ -7307,8 +7305,8 @@ iris_upload_dirty_render_state(struct iris_context *ice,
           screen->driconf.intel_enable_wa_14024015672_msaa);
       if (batch->ice->state.rhwo_disabled != rhwo_disabled) {
          iris_emit_pipe_control_flush(batch, "RHWO state change",
-                                      PIPE_CONTROL_STALL_AT_SCOREBOARD |
-                                      PIPE_CONTROL_CS_STALL);
+                                      PIPE_CONTROL_RENDER_TARGET_FLUSH |
+                                      (GFX_VERx10 >= 125 ? 0 : PIPE_CONTROL_CS_STALL));
          batch->screen->vtbl.disable_rhwo_optimization(
             batch, rhwo_disabled);
       }
@@ -9141,7 +9139,8 @@ iris_upload_compute_walker(struct iris_context *ice,
    idd.BindingTableEntryCount = MIN2(encode_surface_count(screen, shader), 31);
    idd.NumberOfBarriers = cs_data->uses_barrier;
 #if GFX_VER >= 30
-   idd.RegistersPerThread = ptl_register_blocks(shader->brw_prog_data->grf_used);
+   idd.RegistersPerThread =
+      brw_register_blocks(devinfo, shader->brw_prog_data->grf_used);
 #endif
 
 struct GENX(COMPUTE_WALKER_BODY) body = {

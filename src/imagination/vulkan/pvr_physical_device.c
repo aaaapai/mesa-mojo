@@ -139,7 +139,7 @@ static void pvr_physical_device_get_supported_extensions(
       .KHR_external_memory_fd = true,
       .KHR_external_semaphore = true,
       .KHR_external_semaphore_fd = true,
-      .KHR_format_feature_flags2 = false,
+      .KHR_format_feature_flags2 = true,
       .KHR_get_memory_requirements2 = true,
       .KHR_incremental_present = PVR_USE_WSI_PLATFORM,
       .KHR_image_format_list = true,
@@ -151,6 +151,7 @@ static void pvr_physical_device_get_supported_extensions(
       .KHR_maintenance3 = true,
       .KHR_maintenance4 = true,
       .KHR_maintenance5 = true,
+      .KHR_maintenance7 = true,
       .KHR_map_memory2 = true,
       .KHR_multiview = true,
       .KHR_pipeline_executable_properties = true,
@@ -164,7 +165,7 @@ static void pvr_physical_device_get_supported_extensions(
       .KHR_sampler_ycbcr_conversion = true,
       .KHR_separate_depth_stencil_layouts = true,
       .KHR_shader_draw_parameters = true,
-      .KHR_shader_expect_assume = false,
+      .KHR_shader_expect_assume = true,
       .KHR_shader_float_controls = true,
       .KHR_shader_integer_dot_product = true,
       .KHR_shader_non_semantic_info = true,
@@ -178,6 +179,7 @@ static void pvr_physical_device_get_supported_extensions(
       .KHR_swapchain = PVR_USE_WSI_PLATFORM,
       .KHR_swapchain_maintenance1 = PVR_USE_WSI_PLATFORM,
       .KHR_swapchain_mutable_format = PVR_USE_WSI_PLATFORM,
+      .KHR_synchronization2 = true,
       .KHR_timeline_semaphore = true,
       .KHR_unified_image_layouts = true,
       .KHR_uniform_buffer_standard_layout = true,
@@ -214,13 +216,14 @@ static void pvr_physical_device_get_supported_extensions(
       .EXT_shader_subgroup_ballot = true,
       .EXT_shader_subgroup_vote = true,
       .EXT_subgroup_size_control = true,
-      .EXT_texel_buffer_alignment = false,
+      .EXT_texel_buffer_alignment = true,
       .EXT_tooling_info = true,
       .EXT_vertex_attribute_divisor = true,
       .EXT_zero_initialize_device_memory = true,
 #ifdef PVR_USE_WSI_PLATFORM
       .GOOGLE_display_timing = wsi_instance_supports_google_display_timing(&instance->vk, &instance->drirc.options),
 #endif
+      .IMG_filter_linear_2d = true,
    };
 }
 
@@ -354,6 +357,9 @@ static void pvr_physical_device_get_supported_features(
       /* Vulkan 1.4 / VK_KHR_maintenance5 */
       .maintenance5 = true,
 
+      /* VK_KHR_maintenance7 */
+      .maintenance7 = true,
+
       /* Vulkan 1.1 / VK_KHR_shader_draw_parameters */
       .shaderDrawParameters = true,
 
@@ -465,7 +471,7 @@ static void pvr_physical_device_get_supported_features(
       .bufferDeviceAddressMultiDevice = false,
 
       /* VK_KHR_shader_expect_assume */
-      .shaderExpectAssume = false,
+      .shaderExpectAssume = true,
 
       /* VK_EXT_shader_demote_to_helper_invocation */
       .shaderDemoteToHelperInvocation = true,
@@ -491,6 +497,9 @@ static void pvr_physical_device_get_supported_features(
 
       /* VK_KHR_present_wait2 */
       .presentWait2 = PVR_USE_WSI_PLATFORM,
+
+      /* Vulkan 1.3 / VK_KHR_synchronization2 */
+      .synchronization2 = true,
 
       /* Vulkan 1.4 / VK_EXT_vertex_attribute_divisor /
          VK_KHR_vertex_attribute_divisor */
@@ -621,7 +630,7 @@ static bool pvr_physical_device_get_properties(
       .maxImageDimension2D = 4096U,
       .maxImageDimension3D = 256U,
       .maxImageDimensionCube = 4096U,
-      .maxImageArrayLayers = 256U,
+      .maxImageArrayLayers = rogue_get_render_size_max_z(dev_info),
       .maxTexelBufferElements = 64U * 1024U,
       .maxUniformBufferRange = 16U * 1024U,
       .maxStorageBufferRange = 128U * 1024U * 1024U,
@@ -632,12 +641,12 @@ static bool pvr_physical_device_get_properties(
       .sparseAddressSpaceSize = 0U, /* Requires sparseBinding */
       .maxBoundDescriptorSets = 4U,
       .maxPerStageDescriptorSamplers = 16,
-      .maxPerStageDescriptorUniformBuffers = 12,
+      .maxPerStageDescriptorUniformBuffers = 13,
       .maxPerStageDescriptorStorageBuffers = 16,
       .maxPerStageDescriptorSampledImages = 16,
       .maxPerStageDescriptorStorageImages = 4,
       .maxPerStageDescriptorInputAttachments = 4,
-      .maxPerStageResources = 56,
+      .maxPerStageResources = 57,
       .maxDescriptorSetSamplers = 3U * 16U,
       .maxDescriptorSetUniformBuffers = 3U * 12U,
       .maxDescriptorSetUniformBuffersDynamic = 8U,
@@ -951,6 +960,16 @@ static bool pvr_physical_device_get_properties(
 
       /* VK_KHR_line_rasterization */
       .lineSubPixelPrecisionBits = line_sub_pixel_precision_bits,
+
+      /* VK_KHR_maintenance7 */
+      .robustFragmentShadingRateAttachmentAccess = false,
+      .separateDepthStencilAttachmentAccess = false,
+      .maxDescriptorSetTotalUniformBuffersDynamic = PVR_MAX_DESCRIPTOR_SET_UNIFORM_DYNAMIC_BUFFERS,
+      .maxDescriptorSetTotalStorageBuffersDynamic = PVR_MAX_DESCRIPTOR_SET_STORAGE_DYNAMIC_BUFFERS,
+      .maxDescriptorSetTotalBuffersDynamic = PVR_MAX_DYNAMIC_BUFFERS,
+      .maxDescriptorSetUpdateAfterBindTotalUniformBuffersDynamic = PVR_MAX_DESCRIPTOR_SET_UNIFORM_DYNAMIC_BUFFERS,
+      .maxDescriptorSetUpdateAfterBindTotalStorageBuffersDynamic = PVR_MAX_DESCRIPTOR_SET_STORAGE_DYNAMIC_BUFFERS,
+      .maxDescriptorSetUpdateAfterBindTotalBuffersDynamic = PVR_MAX_DYNAMIC_BUFFERS,
    };
 
    if (strlen(pdevice->instance->drirc.debug.force_vk_devicename) > 0) {

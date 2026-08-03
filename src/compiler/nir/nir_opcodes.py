@@ -1482,6 +1482,24 @@ triop_shift_ir3("shrg_ir3", ">>", "|")
 triop_shift_ir3("shlg_ir3", "<<", "|")
 triop("andg_ir3", tuint, _2src_commutative, "(src0 & src1) | src2")
 
+def triop_shift_pan(name, type0, shift_expr):
+    shift_decl = "uint8_t shift_mask = (bit_size - 1); \
+                  uint8_t shift = src1 & shift_mask;"
+    opcode(name + '_and_pan', 0, type0, [0, 0, 0], [type0, tuint8, tuint],
+           False, "", f"{shift_decl}; dst = ({shift_expr}) & src2;")
+    opcode(name + '_or_pan', 0, type0, [0, 0, 0], [type0, tuint8, tuint],
+           False, "", f"{shift_decl}; dst = ({shift_expr}) | src2;")
+    opcode(name + '_xor_pan', 0, type0, [0, 0, 0], [type0, tuint8, tuint],
+           False, "", f"{shift_decl}; dst = ({shift_expr}) ^ src2;")
+
+triop_shift_pan("arshift", tint, "src0 >> shift")
+triop_shift_pan("lshift", tuint, "src0 << shift")
+triop_shift_pan("rshift", tuint, "src0 >> shift")
+triop_shift_pan("lrot", tuint, "(src0 << shift) |\
+                                (src0 >> ((-shift) & shift_mask))")
+triop_shift_pan("rrot", tuint, "(src0 >> shift) |\
+                                (src0 << ((-shift) & shift_mask))")
+
 # r600/gcn specific instruction that evaluates unnormalized cube texture coordinates
 # and face index
 # The actual texture coordinates are evaluated from this according to
@@ -1630,6 +1648,12 @@ float src0_f = get_float_source(src0_cv, execution_mode, 32);
 float src1_f = get_float_source(src1_cv, execution_mode, 32);
 dst = (src0_f > src1_f || isnan(src1_f)) ? src0 : src1;
 """, valid_fp_math_ctrl = preserve_inf + preserve_nan)
+
+# Intel multiply-adds
+triop("imad_32x16_intel", tint32, "", "(src0 * (int16_t) src1) + src2",
+      description = "Multiply 32-bits with low 16-bits, with sign extension, then add a 32-bit value")
+triop("umad_32x16_intel", tuint32, "", "(src0 * (uint16_t) src1) + src2",
+      description = "Multiply 32-bits with low 16-bits, with zero extension, then add a 32-bit value")
 
 # NVIDIA PRMT
 opcode("prmt_nv", 0, tuint32, [0, 0, 0], [tuint32, tuint32, tuint32],

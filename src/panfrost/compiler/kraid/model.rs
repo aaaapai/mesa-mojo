@@ -20,6 +20,12 @@ pub struct FAUModel {
     user_fau_page_words: u16,
     pub small_constants: SmallConstantTable,
     special_fn: Box<dyn Fn(SpecialFAU) -> Option<FAURef> + Send + Sync>,
+
+    /// Instructions before v14 require all the FAU entries to have the
+    /// same FAU RAM index, we can access two distinct 32-bit words but
+    /// they need to be "aligned" to the same 64-bit address.
+    /// This limit has been lifted from v14
+    pub single_fau_ram_index: bool,
 }
 
 impl FAUModel {
@@ -46,6 +52,8 @@ pub trait Model {
     fn op_is_message(&self, op: &Op) -> bool;
 
     fn op_src_is_staging_reg(&self, op: &Op, src: &Src) -> bool;
+
+    fn op_src_is_64bit(&self, op: &Op, src: &Src) -> bool;
 
     fn op_src_supports_imm32(&self, op: &Op, src: &Src, imm: u32) -> bool;
 
@@ -88,6 +96,7 @@ impl ValhallModel {
             special_fn: Box::new(move |special| {
                 ValhallModel::special_fau(special, arch)
             }),
+            single_fau_ram_index: arch < 14,
         };
         ValhallModel { arch, fau }
     }
@@ -173,6 +182,14 @@ impl Model for ValhallModel {
             vop.src_is_staging_reg(src)
         } else {
             v9_op_src_is_staging_reg(op, src, self.arch)
+        }
+    }
+
+    fn op_src_is_64bit(&self, op: &Op, src: &Src) -> bool {
+        if let Some(vop) = op.as_virtual() {
+            vop.src_is_64bit(src)
+        } else {
+            v9_op_src_is_64bit(op, src, self.arch)
         }
     }
 

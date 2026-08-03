@@ -744,6 +744,14 @@ enum pipe_quirk_texture_border_color_swizzle {
    PIPE_QUIRK_TEXTURE_BORDER_COLOR_SWIZZLE_ALPHA_NOT_W = (1 << 3),
 };
 
+enum pipe_device_type
+{
+   PIPE_DEVICE_TYPE_UNKNOWN,
+   PIPE_DEVICE_TYPE_INTEGRATED_GPU,
+   PIPE_DEVICE_TYPE_DISCRETE_GPU,
+   PIPE_DEVICE_TYPE_CPU,
+};
+
 enum pipe_endian
 {
    PIPE_ENDIAN_LITTLE = 0,
@@ -1154,6 +1162,10 @@ struct pipe_caps {
    uint64_t min_vma;
    uint64_t max_vma;
 
+   /** Which POT pattern sizes are accelerated? This is a bitmask of sizes */
+   uint16_t hw_clear_buffer_sizes;
+
+   enum pipe_device_type device_type;
    enum pipe_vertex_input_alignment vertex_input_alignment;
    enum pipe_endian endianness;
    enum pipe_point_size_lower_mode point_size_fixed;

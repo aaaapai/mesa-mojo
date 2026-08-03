@@ -668,6 +668,7 @@ fd_init_screen_caps(struct fd_screen *screen)
    caps->query_so_overflow =
    caps->query_pipeline_statistics_single = is_a6xx(screen);
 
+   caps->device_type = PIPE_DEVICE_TYPE_INTEGRATED_GPU;
    caps->vendor_id = 0x5143;
    caps->device_id = 0xFFFFFFFF;
 
@@ -727,6 +728,9 @@ fd_init_screen_caps(struct fd_screen *screen)
       }
 
       caps->shader_ballot = caps->shader_subgroup_size <= 64;
+
+      /* Up to 16 bytes are accelerated */
+      caps->hw_clear_buffer_sizes = 1 | 2 | 4 | 8 | 16;
    }
 }
 

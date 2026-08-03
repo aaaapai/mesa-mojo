@@ -155,6 +155,8 @@ struct v3dv_instance {
    bool pipeline_cache_enabled;
    bool default_pipeline_cache_enabled;
    bool meta_cache_enabled;
+   /* A value of 0 means unlimited caching. */
+   uint32_t pipeline_cache_max_entries;
 };
 
 enum v3dv_queue_type {
@@ -291,6 +293,13 @@ struct v3dv_device {
 
    uint32_t bo_size;
    uint32_t bo_count;
+
+   /* Monotonically increasing id used to give VK_EXT_device_memory_report
+    * a memObjectId that stays unique across BO cache reuse, since the
+    * cache can hand back the same struct v3dv_bo (and thus the same
+    * kernel handle) for what is logically a new allocation.
+    */
+   uint32_t bo_report_id;
 
    /* Event handling resources.
     *

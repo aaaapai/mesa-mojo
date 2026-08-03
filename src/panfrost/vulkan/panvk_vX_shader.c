@@ -96,7 +96,7 @@ panvk_lower_sysvals(nir_builder *b, nir_instr *instr, void *data)
       break;
 
 #if PAN_ARCH < 9
-   case nir_intrinsic_load_raw_vertex_offset_pan:
+   case nir_intrinsic_load_raw_vertex_offset:
       val = load_sysval(b, graphics, bit_size, vs.raw_vertex_offset);
       break;
    case nir_intrinsic_load_layer_id:
@@ -206,7 +206,7 @@ panvk_lower_load_vs_input(nir_builder *b, nir_intrinsic_instr *intrin,
    nir_def *ld_attr = nir_load_attribute_pan(
       b, intrin->def.num_components, intrin->def.bit_size,
       PAN_ARCH < 9 ?
-         nir_load_raw_vertex_id_pan(b) :
+         nir_load_raw_vertex_id(b) :
          nir_load_vertex_id(b),
       nir_load_instance_id(b),
       nir_get_io_offset_src(intrin)->ssa,
@@ -407,12 +407,10 @@ panvk_buffer_ssbo_addr_format(VkPipelineRobustnessBufferBehaviorEXT robustness)
 
 static const nir_shader_compiler_options *
 panvk_get_nir_options(UNUSED struct vk_physical_device *vk_pdev,
-                      UNUSED mesa_shader_stage stage,
+                      mesa_shader_stage stage,
                       UNUSED const struct vk_pipeline_robustness_state *rs)
 {
-   struct panvk_physical_device *phys_dev = to_panvk_physical_device(vk_pdev);
-   return pan_get_nir_shader_compiler_options(
-      pan_arch(phys_dev->kmod.dev->props.gpu_id), false);
+   return pan_get_nir_shader_compiler_options(PAN_ARCH, stage, false);
 }
 
 static struct spirv_to_nir_options
@@ -584,6 +582,19 @@ valhall_pack_buf_idx(nir_builder *b, nir_instr *instr, UNUSED void *data)
 #endif
 
 static bool
+is_robust_ssbo_intr(const nir_intrinsic_instr *intr, UNUSED const void *data)
+{
+   switch (intr->intrinsic) {
+   case nir_intrinsic_store_ssbo:
+   case nir_intrinsic_ssbo_atomic:
+   case nir_intrinsic_ssbo_atomic_swap:
+      return true;
+   default:
+      return false;
+   }
+}
+
+static bool
 valhall_lower_get_ssbo_size(struct nir_builder *b,
                             nir_intrinsic_instr *intr, void *data)
 {
@@ -747,7 +758,7 @@ lower_load_push_consts(nir_shader *nir, struct panvk_shader_variant *shader)
     * scalarization+dead-code-elimination. Since these pass happen in
     * bifrost_compile(), we can't run the push_constant packing after the
     * optimization took place, so let's just have our own FAU count instead
-    * of using info.push.count to make it consistent with the
+    * of using info.fau.end to make it consistent with the
     * used_{sysvals,push_consts} bitmaps, even if it sometimes implies loading
     * more than we really need. Doing that also takes into account the fact
     * blend constants are never loaded from the fragment shader, but might be
@@ -856,6 +867,16 @@ panvk_lower_nir(struct panvk_device *dev, nir_shader *nir,
             nir_address_format_32bit_offset);
    NIR_PASS(_, nir, nir_lower_explicit_io, nir_var_mem_global,
             nir_address_format_64bit_global);
+
+   /* nir_lower_ssbo lowers SSBO writes to unbounded store_global, so the
+    * descriptor-level bounds check Mali HW does for native buffer
+    * loads/stores is bypassed. Insert software bounds checks here for SSBO
+    * accesses when robust storage buffer access is requested. */
+   if (rs->storage_buffers != VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DISABLED_EXT) {
+      NIR_PASS(_, nir, nir_lower_robust_access, is_robust_ssbo_intr, NULL);
+      NIR_PASS(_, nir, nir_opt_constant_folding);
+      NIR_PASS(_, nir, nir_opt_dce);
+   }
 
 #if PAN_ARCH >= 10
    if (allow_merging_workgroups) {
@@ -991,12 +1012,10 @@ panvk_compile_nir(struct panvk_device *dev, nir_shader *nir,
 
    lower_load_push_consts(nir, shader);
 
-   /* Allow the remaining FAU space to be filled with constants. */
-   input.fau_consts.max_amount =
-      2 * (FAU_WORD_COUNT - shader->fau.total_count);
-   input.fau_consts.offset = shader->fau.total_count * 2;
-   input.fau_consts.values = &shader->info.fau_consts[0];
-   assert(input.fau_consts.max_amount <= ARRAY_SIZE(shader->info.fau_consts));
+   /* Reserve sysvals/push-const, the compiler may fill the remaining space with
+    * promoted constants. */
+   input.fau.reserved = shader->fau.total_count * 2;
+   input.fau.promote_immediates = true;
 
    struct util_dynarray binary = UTIL_DYNARRAY_INIT;
    pan_shader_compile(nir, &input, &binary, &shader->info);
@@ -1004,7 +1023,7 @@ panvk_compile_nir(struct panvk_device *dev, nir_shader *nir,
    /* Propagate potential additional FAU values into the panvk info struct. */
    /* FAU consts are pushed as 32bit values, but total_count is for 64bit
     * ones. */
-   shader->fau.total_count += DIV_ROUND_UP(shader->info.fau_consts_count, 2);
+   shader->fau.total_count = DIV_ROUND_UP(shader->info.fau.count, 2);
 
    void *bin_ptr = util_dynarray_element(&binary, uint8_t, 0);
    unsigned bin_size = util_dynarray_num_elements(&binary, uint8_t);
@@ -1048,10 +1067,10 @@ panvk_compile_nir(struct panvk_device *dev, nir_shader *nir,
       shader->asm_str = asm_str;
    }
 
-   /* We need to update info.push.count because it's used to initialize the
+   /* Pad the total to the 64-bit-aligned FAU count; it's used to initialize the
     * RSD in pan_shader_prepare_rsd().
     */
-   shader->info.push.count = shader->fau.total_count * 2;
+   shader->info.fau.count = shader->fau.total_count * 2;
 
 #if PAN_ARCH < 9
    /* Patch the descriptor count */
@@ -1527,7 +1546,8 @@ panvk_compile_shader(struct panvk_device *dev,
        * options to take into account that threads from different workgroups
        * may be in the same subgroup */
       if (variant->info.cs.allow_merging_workgroups) {
-         nir->options = pan_get_nir_shader_compiler_options(PAN_ARCH, true);
+         nir->options = pan_get_nir_shader_compiler_options(
+            PAN_ARCH, MESA_SHADER_COMPUTE, true);
          /* Invalidate the old divergence analysis */
          nir_foreach_function_impl(impl, nir)
             nir_progress(true, impl, ~nir_metadata_divergence);

@@ -410,18 +410,18 @@ radv_ps_needs_state_sgpr(const struct radv_shader_info *info, const struct radv_
    if (info->ps.needs_sample_positions && gfx_state->dynamic_rasterization_samples)
       return true;
 
-   if (gfx_state->dynamic_line_rast_mode)
+   if (info->ps.needs_poly_line_smooth)
       return true;
 
    if (info->ps.reads_sample_mask_in && (info->ps.uses_sample_shading || gfx_state->ms.sample_shading_enable))
       return true;
 
    /* For computing barycentrics when the primitive topology is unknown at compile time (GPL). */
-   if (info->ps.load_rasterization_prim && gfx_state->unknown_rast_prim)
+   if (info->ps.load_rasterization_prim)
       return true;
 
    if (info->ps.selects_frag_coord_xy_dynamically || info->ps.selects_quad_pos_dynamically ||
-       info->ps.selects_sample_mask_in_dynamically)
+       info->ps.selects_sample_mask_in_dynamically || info->ps.selects_front_face_dynamically)
       return true;
 
    return false;
