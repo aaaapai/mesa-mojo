@@ -821,7 +821,7 @@ impl Src {
         if let Some(swizzle_word) = self.swizzle.word(word) {
             use SwizzleWord::*;
             match swizzle_word {
-                Zero => 0.into(),
+                Zero => 0_u32.into(),
                 Word0 => Src::from(self.src_ref.word(0)),
                 Word1 => Src::from(self.src_ref.word(1)),
                 Sign0 => Src::from(self.src_ref.word(0)).swizzle(Swizzle::S3),
@@ -836,7 +836,7 @@ impl Src {
             } else {
                 let swizzle = self.swizzle.swizzle(Swizzle::S3).unwrap();
                 if swizzle.is_zero() {
-                    0.into()
+                    0_u32.into()
                 } else {
                     Src { swizzle, ..self }
                 }
@@ -844,21 +844,17 @@ impl Src {
         }
     }
 
-    pub fn imm_u8(u: u8) -> Src {
-        Src::from(u32::from(u)).byte(0)
-    }
-
-    pub fn imm_u16(u: u16) -> Src {
-        Src::from(u32::from(u)).half(0)
+    pub fn zero(bits: u8) -> Src {
+        match bits {
+            8 => Src::from(0_u8),
+            16 => Src::from(0_u16),
+            32 => Src::from(0_u32),
+            _ => panic!("Invalid float bit size"),
+        }
     }
 
     pub fn fneg_zero(bits: u8) -> Src {
-        let zero = match bits {
-            16 => Src::imm_u16(0),
-            32 => Src::from(0),
-            _ => panic!("Invalid float bit size"),
-        };
-        zero.fneg()
+        Src::zero(bits).fneg()
     }
 
     pub fn modify(mut self, src_mod: SrcMod) -> Src {
@@ -959,6 +955,18 @@ impl<T: Into<SrcRef>> From<T> for Src {
             src_mod: Default::default(),
             last_use: false,
         }
+    }
+}
+
+impl From<u16> for Src {
+    fn from(u: u16) -> Src {
+        Src::from(u32::from(u)).half(0)
+    }
+}
+
+impl From<u8> for Src {
+    fn from(u: u8) -> Src {
+        Src::from(u32::from(u)).byte(0)
     }
 }
 

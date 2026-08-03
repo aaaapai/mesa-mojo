@@ -1920,7 +1920,7 @@ tu_pipeline_builder_compile_shaders(struct tu_pipeline_builder *builder,
       keys[MESA_SHADER_FRAGMENT].fragment_density_map =
          builder->fragment_density_map;
       keys[MESA_SHADER_FRAGMENT].fdm_per_layer =
-         builder->fdm_per_layer;
+         disable_fdm_msaa ? false : builder->fdm_per_layer;
       keys[MESA_SHADER_FRAGMENT].max_fdm_layers = builder->max_fdm_layers;
       keys[MESA_SHADER_FRAGMENT].unscaled_input_fragcoord =
          builder->unscaled_input_fragcoord;

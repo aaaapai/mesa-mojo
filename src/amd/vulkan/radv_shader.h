@@ -141,10 +141,9 @@ struct radv_graphics_state_key {
    uint32_t adjust_frag_coord_z : 1;
    uint32_t dynamic_rasterization_samples : 1;
    uint32_t dynamic_provoking_vtx_mode : 1;
-   uint32_t dynamic_line_rast_mode : 1;
-   uint32_t enable_remove_point_size : 1;
+   uint32_t smooth_lines_may_be_enabled : 1;
    uint32_t dcc_decompress_gfx11 : 1;
-   uint32_t reserved : 12;
+   uint32_t reserved : 13;
 
    struct {
       uint8_t topology;
@@ -247,11 +246,11 @@ struct radv_llvm_compiler_options {
 
 #define PS_STATE_NUM_SAMPLES__SHIFT             0
 #define PS_STATE_NUM_SAMPLES__MASK              0xf
-#define PS_STATE_LINE_RAST_MODE__SHIFT          4
-#define PS_STATE_LINE_RAST_MODE__MASK           0x3
-#define PS_STATE_PS_ITER_MASK__SHIFT            6
+#define PS_STATE_SMOOTH_LINES__SHIFT            4
+#define PS_STATE_SMOOTH_LINES__MASK             0x1
+#define PS_STATE_PS_ITER_MASK__SHIFT            5
 #define PS_STATE_PS_ITER_MASK__MASK             0xff
-/* gap: bits 14:21 */
+/* gap: bits 13:21 */
 #define PS_STATE_RAST_PRIM__SHIFT               22
 #define PS_STATE_RAST_PRIM__MASK                0x3
 #define PS_STATE_USE_FLOAT_FRAG_COORD_XY__SHIFT 24

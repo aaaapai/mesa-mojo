@@ -265,10 +265,10 @@ impl<'a> ShaderFromNir<'a> {
         assert_eq!(imm_u32.len(), usize::from(bits.div_ceil(32)));
 
         if bits == 8 {
-            let ssa = b.copy_i8(Src::imm_u8(imm_u32[0] as u8));
+            let ssa = b.copy_i8((imm_u32[0] as u8).into());
             self.set_ssa(&load.def, vec![ssa]);
         } else if bits == 16 {
-            let ssa = b.copy_i16(Src::imm_u16(imm_u32[0] as u16));
+            let ssa = b.copy_i16((imm_u32[0] as u16).into());
             self.set_ssa(&load.def, vec![ssa]);
         } else {
             self.set_ssa(
@@ -496,10 +496,10 @@ impl<'a> ShaderFromNir<'a> {
                 assert!(sel < 4);
 
                 let mut bytes = [
-                    Src::imm_u8(0),
-                    Src::imm_u8(0),
-                    Src::imm_u8(0),
-                    Src::imm_u8(0),
+                    Src::from(0_u8),
+                    Src::from(0_u8),
+                    Src::from(0_u8),
+                    Src::from(0_u8),
                 ];
                 bytes[sel as usize] = srcs(0).byte(0);
 
@@ -518,7 +518,7 @@ impl<'a> ShaderFromNir<'a> {
                     .expect("nir_op_insert.src[1] should be constant");
                 assert!(sel < 2);
 
-                let mut halves = [Src::imm_u16(0), Src::imm_u16(0)];
+                let mut halves = [Src::from(0_u16), Src::from(0_u16)];
                 halves[sel as usize] = srcs(0).half(0);
 
                 b.push_op(OpMkVecV2I16 {
@@ -714,7 +714,7 @@ impl<'a> ShaderFromNir<'a> {
                         _ => panic!("Usupported float comparison"),
                     },
                     srcs: [srcs(0), srcs(1)],
-                    accum: 0.into(),
+                    accum: 0_u32.into(),
                     accum_op: CmpAccumOp::None,
                 });
             }
@@ -1012,7 +1012,7 @@ impl<'a> ShaderFromNir<'a> {
                     dst: dst.into(),
                     dst_type: dst_type(NumericType::Integer),
                     saturate: false,
-                    srcs: [0.into(), srcs(0)],
+                    srcs: [0_u32.into(), srcs(0)],
                 });
             }
             nir_op_inot => {
@@ -1023,8 +1023,8 @@ impl<'a> ShaderFromNir<'a> {
                     logic_op: LogicOp::None,
                     not_result: true,
                     src0: srcs(0),
-                    shift: Src::imm_u8(0),
-                    src2: 0.into(),
+                    shift: Src::from(0_u8),
+                    src2: 0_u32.into(),
                 });
             }
             nir_op_ieq_pan | nir_op_ige_pan | nir_op_ilt_pan
@@ -1052,7 +1052,7 @@ impl<'a> ShaderFromNir<'a> {
                         res_type: CmpResultType::C,
                         cmp_op,
                         srcs: [srcs(0).word(0), srcs(1).word(0)],
-                        accum: 0.into(),
+                        accum: 0_u32.into(),
                     });
                     b.push_op(OpICmpMulti {
                         dst: dst[0].into(),
@@ -1072,7 +1072,7 @@ impl<'a> ShaderFromNir<'a> {
                         res_type: CmpResultType::M1,
                         cmp_op,
                         srcs: [srcs(0), srcs(1)],
-                        accum: 0.into(),
+                        accum: 0_u32.into(),
                         accum_op: CmpAccumOp::None,
                     });
                 }
@@ -1416,7 +1416,7 @@ impl<'a> ShaderFromNir<'a> {
                     let ssa = tmp[usize::from(c) / 2];
                     vec_srcs.push(Src::from(ssa).half(c % 2));
                 } else {
-                    vec_srcs.push(Src::imm_u16(0));
+                    vec_srcs.push(Src::from(0_u16));
                 }
             }
         } else {
@@ -1500,6 +1500,41 @@ impl<'a> ShaderFromNir<'a> {
                     coords: [x, y],
                     idx,
                 });
+            }
+            nir_intrinsic_ddx
+            | nir_intrinsic_ddx_fine
+            | nir_intrinsic_ddx_coarse
+            | nir_intrinsic_ddy
+            | nir_intrinsic_ddy_fine
+            | nir_intrinsic_ddy_coarse => {
+                let dst_type = DataType::get(
+                    intrin.def.num_components,
+                    NumericType::Float,
+                    intrin.def.bit_size,
+                );
+                let axis = match intrin.intrinsic {
+                    nir_intrinsic_ddx
+                    | nir_intrinsic_ddx_fine
+                    | nir_intrinsic_ddx_coarse => DerivativeAxis::X,
+                    nir_intrinsic_ddy
+                    | nir_intrinsic_ddy_fine
+                    | nir_intrinsic_ddy_coarse => DerivativeAxis::Y,
+                    _ => unreachable!(),
+                };
+                let coarse = matches!(
+                    intrin.intrinsic,
+                    nir_intrinsic_ddx_coarse | nir_intrinsic_ddy_coarse
+                );
+                let sign_is_ignored =
+                    unsafe { nir_def_all_uses_ignore_sign_bit(&intrin.def) };
+                let ssa = b.derivative(
+                    dst_type,
+                    self.get_src(&srcs[0]),
+                    axis,
+                    coarse,
+                    sign_is_ignored,
+                );
+                self.set_ssa(&intrin.def, vec![ssa]);
             }
             nir_intrinsic_global_atomic => {
                 let atom_op = match intrin.atomic_op() {
@@ -1961,7 +1996,7 @@ impl<'a> ShaderFromNir<'a> {
                 cfg.add_edge(label, succ_label);
                 b.push_op(OpBranch {
                     not: true,
-                    cond: 0.into(),
+                    cond: 0_u32.into(),
                     combine_op: BranchCombineOp::None,
                     label: succ_label,
                 });

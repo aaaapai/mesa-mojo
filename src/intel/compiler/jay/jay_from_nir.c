@@ -823,9 +823,9 @@ jay_resource_handle(jay_builder *b,
 }
 
 static inline enum lsc_flush_type
-translate_flush_type(nir_intrinsic_instr *intr)
+translate_flush_type(nir_memory_semantics semantics)
 {
-   switch (nir_intrinsic_memory_semantics(intr)) {
+   switch (semantics) {
    case NIR_MEMORY_ACQUIRE:
       return LSC_FLUSH_TYPE_INVALIDATE;
    case NIR_MEMORY_RELEASE:
@@ -839,51 +839,90 @@ translate_flush_type(nir_intrinsic_instr *intr)
    }
 }
 
+struct jay_barrier_params {
+   mesa_scope execution_scope;
+   mesa_scope memory_scope;
+   nir_memory_semantics memory_semantics;
+   nir_variable_mode memory_modes;
+};
+
 static void
 emit_lsc_fence(struct nir_to_jay_state *nj,
                enum gen_sfid sfid,
-               enum lsc_fence_scope scope,
-               enum lsc_flush_type flushtype)
+               const struct jay_barrier_params *params)
 {
+   enum lsc_fence_scope scope =
+      params->memory_scope >= SCOPE_QUEUE_FAMILY ? LSC_FENCE_TILE :
+                                                   LSC_FENCE_THREADGROUP;
+   enum lsc_flush_type flushtype =
+      sfid == GEN_SFID_SLM ? LSC_FLUSH_TYPE_NONE :
+                             translate_flush_type(params->memory_semantics);
+    
+   if (params->memory_scope >= SCOPE_WORKGROUP &&
+       sfid == GEN_SFID_TGM &&
+       nj->devinfo->ver >= 20) {
+      /* On Xe2 and Xe3 we need the eviction of dirty lines and/or invalidation
+       * of clean lines for threadgroup scope due to aliasing of TGM data in L1
+       * (HSD 14020414266). On Xe3p we need this due to how data post-format
+       * conversion happens (HSD 22020984324). Although we have already set
+       * flush_type to the appropriate value, we also need to upgrade the scope
+       * to at least TILE for the flush to actually take effect.
+       */
+      scope = LSC_FENCE_TILE;
+   }
+
+   if (!(params->memory_semantics & NIR_MEMORY_RELEASE) &&
+       scope == LSC_FENCE_THREADGROUP) {
+      /* Acquire fences with threadgroup scope or below are NOP in this case,
+       * the release fences in any associated release sequences and schedule
+       * barrier we emit before acquire fences should already give us all the
+       * ordering we need.
+       */
+      return;
+   }
+
    jay_def notif = jay_alloc_def(&nj->bld, UGPR, jay_ugpr_per_grf(nj->s));
    uint32_t desc = lsc_fence_msg_desc(nj->s->devinfo, scope, flushtype, false);
+
    jay_SEND(&nj->bld, .sfid = sfid, .msg_desc = desc, .srcs = &nj->payload.u0,
             .nr_srcs = 1, .type = JAY_TYPE_U32, .uniform = true, .dst = notif);
 }
 
 static void
-emit_lsc_fence_from_intr(struct nir_to_jay_state *nj,
-                         nir_intrinsic_instr *intr,
-                         enum gen_sfid sfid)
+jay_emit_memory_barrier(struct nir_to_jay_state *nj,
+                        const struct jay_barrier_params *params)
 {
-   bool device = nir_intrinsic_memory_scope(intr) >= SCOPE_QUEUE_FAMILY;
-   enum lsc_fence_scope scope = device ? LSC_FENCE_TILE : LSC_FENCE_THREADGROUP;
-   enum lsc_flush_type type =
-      sfid == GEN_SFID_SLM ? LSC_FLUSH_TYPE_NONE : translate_flush_type(intr);
-   emit_lsc_fence(nj, sfid, scope, type);
-}
+   if (params->memory_semantics & NIR_MEMORY_ACQUIRE) {
+      /* Ensures that prior atomics (including atomic reads) across all shared
+       * functions are sequenced before a barrier with acquire semantics.
+       */
+      jay_SCHEDULE_BARRIER(&nj->bld);
+   }
 
-static void
-jay_emit_memory_barrier(struct nir_to_jay_state *nj, nir_intrinsic_instr *intr)
-{
-   nir_variable_mode modes = nir_intrinsic_memory_modes(intr);
-
-   if (modes & nir_var_image) {
-      emit_lsc_fence_from_intr(nj, intr, GEN_SFID_TGM);
+   if (params->memory_modes & nir_var_image) {
+      emit_lsc_fence(nj, GEN_SFID_TGM, params);
       assert(!nj->nir->info.use_lowered_image_to_global && "fix common code");
    }
 
-   if (modes & (nir_var_mem_ssbo | nir_var_mem_global)) {
-      emit_lsc_fence_from_intr(nj, intr, GEN_SFID_UGM);
+   if (params->memory_modes & (nir_var_mem_ssbo | nir_var_mem_global)) {
+      emit_lsc_fence(nj, GEN_SFID_UGM, params);
    }
 
-   if (modes & (nir_var_shader_out | nir_var_mem_task_payload)) {
-      emit_lsc_fence_from_intr(nj, intr, GEN_SFID_URB);
+   if (params->memory_modes & (nir_var_shader_out | nir_var_mem_task_payload)) {
+      emit_lsc_fence(nj, GEN_SFID_URB, params);
    }
 
-   if ((modes & nir_var_mem_shared) &&
+   if ((params->memory_modes & nir_var_mem_shared) &&
        !jay_workgroup_is_one_subgroup(&nj->bld, nj->nir)) {
-      emit_lsc_fence_from_intr(nj, intr, GEN_SFID_SLM);
+      emit_lsc_fence(nj, GEN_SFID_SLM, params);
+   }
+
+   if (params->memory_semantics & NIR_MEMORY_RELEASE) {
+      /* Ensure that control barriers and subsequent atomics (including atomic
+       * writes) across all shared functions are sequenced after a barrier with
+       * release semantics.
+       */
+      jay_SCHEDULE_BARRIER(&nj->bld);
    }
 }
 
@@ -912,7 +951,32 @@ jay_emit_signal_barrier(jay_builder *b, struct nir_to_jay_state *nj)
    jay_SEND(b, .sfid = GEN_SFID_MESSAGE_GATEWAY,
             .msg_desc = GEN_MESSAGE_GATEWAY_SFID_BARRIER_MSG, .srcs = &zipped,
             .nr_srcs = 1, .type = JAY_TYPE_U32, .uniform = true);
+
+   /* Task/mesh inherit cs_prog_data */
+   if (mesa_shader_stage_uses_workgroup(nj->s->stage)) {
+      nj->s->prog_data->cs.uses_barrier = true;
+   }
 }
+
+static void
+jay_emit_barrier_s(struct nir_to_jay_state *nj,
+                   const struct jay_barrier_params *params)
+{
+   if (params->memory_scope != SCOPE_NONE) {
+      jay_emit_memory_barrier(nj, params);
+   }
+
+   if (params->execution_scope == SCOPE_WORKGROUP &&
+       ((mesa_shader_stage_uses_workgroup(nj->s->stage) &&
+         !jay_workgroup_is_one_subgroup(&nj->bld, nj->nir)) ||
+        (nj->s->stage == MESA_SHADER_TESS_CTRL &&
+         nj->s->prog_data->tcs.instances != 1))) {
+      jay_emit_signal_barrier(&nj->bld, nj);
+   }
+}
+
+#define jay_emit_barrier(nj, ...)                                              \
+   jay_emit_barrier_s((nj), &(struct jay_barrier_params) { 0, __VA_ARGS__ });
 
 static void
 jay_emit_derivative(jay_builder *b,
@@ -1087,7 +1151,8 @@ jay_emit_fb_write(struct nir_to_jay_state *nj, nir_intrinsic_instr *intr)
          srcs[len++] = jay_extract(packed, i);
    }
 
-   jay_SEND(b, .sfid = GEN_SFID_RENDER_CACHE, .check_tdr = true,
+   jay_CHECK_TDR(b);
+   jay_SEND(b, .sfid = GEN_SFID_RENDER_CACHE,
             .msg_desc = desc | (ex_desc << 32), .srcs = srcs, .nr_srcs = len,
             .type = JAY_TYPE_U32, .eot = last, .split = pf == GPR ? split : -1,
             .skip_helpers = true);
@@ -1260,10 +1325,6 @@ jay_emit_mem_access(struct nir_to_jay_state *nj, nir_intrinsic_instr *intr)
 
    bool cmask = op == LSC_OP_LOAD_CMASK || op == LSC_OP_STORE_CMASK;
    bool uniform = !(has_dest && dst.file != UGPR);
-
-   if (nir_intrinsic_has_align(intr)) {
-      assert(nir_intrinsic_align(intr) >= (ndata->bit_size / 8));
-   }
 
    if (!has_dest) {
       uniform &= jay_is_null(data) || data.file == UGPR;
@@ -1472,26 +1533,6 @@ jay_emit_barycentric(struct nir_to_jay_state *nj,
    jay_copy(&nj->bld, nj_def(&intr->def), nj->payload.fs.bary[mode]);
 }
 
-static void
-jay_emit_rt_lsc_fence(struct nir_to_jay_state *nj,
-                      enum lsc_fence_scope scope,
-                      enum lsc_flush_type type)
-{
-   jay_def notif = jay_alloc_def(&nj->bld, UGPR, jay_ugpr_per_grf(nj->s));
-   uint32_t desc = lsc_fence_msg_desc(nj->s->devinfo, scope, type, true);
-
-   jay_SEND(&nj->bld, .sfid = GEN_SFID_UGM, .msg_desc = desc,
-            .srcs = &nj->payload.u0, .nr_srcs = 1, .type = JAY_TYPE_U32,
-            .uniform = true, .dst = notif);
-
-   /* There is no implicit ordering between messages to the dataport, the
-    * thread sorting unit, and the raytracing accelerator. We need to manually
-    * wait on the SBIDs of these fence messages to ensure all pending writes
-    * have landed before sending messages to the BTD/RTA units.
-    */
-   jay_SCHEDULE_BARRIER(&nj->bld);
-}
-
 static uint32_t
 build_rt_header_and_srcs(struct nir_to_jay_state *nj, nir_intrinsic_instr *instr,
                          jay_def *srcs, uint32_t *split_len)
@@ -1505,7 +1546,9 @@ build_rt_header_and_srcs(struct nir_to_jay_state *nj, nir_intrinsic_instr *instr
     * fixed function within the DSS, as well as stack pointers to resume
     * shaders.
     */
-   jay_emit_rt_lsc_fence(nj, LSC_FENCE_LOCAL, LSC_FLUSH_TYPE_NONE);
+   jay_emit_barrier(nj, .memory_scope = SCOPE_WORKGROUP,
+                    .memory_semantics = NIR_MEMORY_RELEASE,
+                    .memory_modes = nir_var_mem_global);
 
    /*
     * TODO: Look into efficient RA implications for moving all zeros
@@ -1851,7 +1894,7 @@ jay_emit_intrinsic(struct nir_to_jay_state *nj, nir_intrinsic_instr *intr)
 
    switch (intr->intrinsic) {
    case nir_intrinsic_resource_intel:
-      /* No code to generate here */
+      jay_MOV(b, dst, nj_src(intr->src[1]));
       break;
 
    case nir_intrinsic_global_atomic:
@@ -1912,26 +1955,30 @@ jay_emit_intrinsic(struct nir_to_jay_state *nj, nir_intrinsic_instr *intr)
       break;
    }
 
-   case nir_intrinsic_barrier: {
-      jay_SCHEDULE_BARRIER(b);
-
-      if (nir_intrinsic_memory_scope(intr) != SCOPE_NONE) {
-         jay_emit_memory_barrier(nj, intr);
-      }
-
-      if (nir_intrinsic_execution_scope(intr) == SCOPE_WORKGROUP &&
-          (((cs || task_mesh) && !jay_workgroup_is_one_subgroup(b, nj->nir)) ||
-           (tcs && s->prog_data->tcs.instances != 1))) {
-         jay_emit_signal_barrier(b, nj);
-         s->prog_data->cs.uses_barrier = true;
-      }
-
+   case nir_intrinsic_barrier:
+      jay_emit_barrier(nj,
+                       .execution_scope = nir_intrinsic_execution_scope(intr),
+                       .memory_scope = nir_intrinsic_memory_scope(intr),
+                       .memory_semantics = nir_intrinsic_memory_semantics(intr),
+                       .memory_modes = nir_intrinsic_memory_modes(intr));
       break;
-   }
 
    case nir_intrinsic_begin_invocation_interlock:
+      jay_CHECK_TDR(b);
+      jay_emit_barrier(nj, .memory_scope = SCOPE_WORKGROUP,
+                       .memory_semantics = NIR_MEMORY_ACQUIRE,
+                       .memory_modes = nir_var_mem_global |
+                                       nir_var_mem_ssbo |
+                                       nir_var_image);
+      break;
+
    case nir_intrinsic_end_invocation_interlock:
-      UNREACHABLE("TODO");
+      jay_emit_barrier(nj, .memory_scope = SCOPE_WORKGROUP,
+                       .memory_semantics = NIR_MEMORY_RELEASE,
+                       .memory_modes = nir_var_mem_global |
+                                       nir_var_mem_ssbo |
+                                       nir_var_image);
+      break;
 
    case nir_intrinsic_load_reloc_const_intel:
       jay_RELOC(b, dst, nir_intrinsic_param_idx(intr),
@@ -3296,7 +3343,9 @@ jay_emit_task_mesh_fence_workaround(struct nir_to_jay_state *nj)
    if (nj->nir->info.stage == MESA_SHADER_MESH ||
        nj->nir->info.stage == MESA_SHADER_TASK) {
       /* HSD-22014129519 workaround */
-      emit_lsc_fence(nj, GEN_SFID_URB, LSC_FENCE_GPU, LSC_FLUSH_TYPE_NONE);
+      jay_emit_barrier(nj, .memory_scope = SCOPE_QUEUE_FAMILY,
+                       .memory_semantics = NIR_MEMORY_RELEASE,
+                       .memory_modes = nir_var_shader_out);
    }
 }
 

@@ -119,11 +119,11 @@ v3dv_destroy_pipeline(struct v3dv_pipeline *pipeline,
 
    if (pipeline->spill.bo) {
       assert(pipeline->spill.size_per_thread > 0);
-      v3dv_bo_free(device, pipeline->spill.bo);
+      v3dv_bo_free(device, pipeline->spill.bo, 0);
    }
 
    if (pipeline->default_attribute_values) {
-      v3dv_bo_free(device, pipeline->default_attribute_values);
+      v3dv_bo_free(device, pipeline->default_attribute_values, 0);
       pipeline->default_attribute_values = NULL;
    }
 
@@ -1494,7 +1494,9 @@ upload_assembly(struct v3dv_pipeline *pipeline)
    }
 
    struct v3dv_bo *bo = v3dv_bo_alloc(pipeline->device, total_size,
-                                      "pipeline shader assembly", true);
+                                      "pipeline shader assembly", true,
+                                      VK_OBJECT_TYPE_PIPELINE,
+                                      vk_object_to_u64_handle(&pipeline->base));
    if (!bo) {
       mesa_loge("Failed to allocate memory for shader");
       return false;
@@ -1618,10 +1620,12 @@ pipeline_check_spill_size(struct v3dv_pipeline *pipeline)
          4 * device->devinfo.qpu_count * max_spill_size;
       if (pipeline->spill.bo) {
          assert(pipeline->spill.size_per_thread > 0);
-         v3dv_bo_free(device, pipeline->spill.bo);
+         v3dv_bo_free(device, pipeline->spill.bo, 0);
       }
       pipeline->spill.bo =
-         v3dv_bo_alloc(device, total_spill_size, "spill", true);
+         v3dv_bo_alloc(device, total_spill_size, "spill", true,
+                       VK_OBJECT_TYPE_PIPELINE,
+                       vk_object_to_u64_handle(&pipeline->base));
       pipeline->spill.size_per_thread = max_spill_size;
    }
 }
@@ -2197,6 +2201,9 @@ v3dv_pipeline_shared_data_new_empty(const unsigned char blake3_key[BLAKE3_KEY_LE
 
    new_entry->ref_cnt = 1;
    memcpy(new_entry->blake3_key, blake3_key, BLAKE3_KEY_LEN);
+
+   new_entry->owner_type = VK_OBJECT_TYPE_PIPELINE;
+   new_entry->owner_handle = vk_object_to_u64_handle(&pipeline->base);
 
    return new_entry;
 

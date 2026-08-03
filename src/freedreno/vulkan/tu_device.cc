@@ -46,6 +46,9 @@
 #include "tu_tracepoints.h"
 #include "tu_wsi.h"
 
+#include "git_sha1.h"
+#include "tu_version.h"
+
 #ifdef TU_WSI_PLATFORM
 #include "wsi_common.h"
 #endif

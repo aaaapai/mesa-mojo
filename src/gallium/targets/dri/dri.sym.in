@@ -8,6 +8,7 @@
                 _mesa_glapi_set_dispatch;
                 _mesa_glapi_tls_Context;
                 _mesa_glapi_tls_Dispatch;
+                _glapi_get_proc_name;
 
 		ddebug_screen_create;
 		noop_screen_create;
@@ -69,6 +70,9 @@
 		dri_set_blob_cache_funcs;
 		dri_get_pipe_screen;
 		dri_get_drm_device_info;
+		glXGetProcAddress;
+                glXGetProcAddressARB;
+                gl*;
 		dri3*;
 		loader_dri3*;
 		dri_create_drawable;

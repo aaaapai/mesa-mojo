@@ -3109,7 +3109,8 @@ get_mem_access_size_align(nir_intrinsic_op intrin, uint8_t bytes,
          uint32_t comps = bytes / 8;
 
          /* We would need to SIMD split for dvec3+ */
-         comps = MIN2(comps, 2);
+         if (mem_cb_data->info->max_subgroup_size > 16)
+            comps = MIN2(comps, 2);
 
          return (nir_mem_access_size_align) {
             .bit_size = 64,
@@ -3153,8 +3154,9 @@ get_mem_access_size_align(nir_intrinsic_op intrin, uint8_t bytes,
          if (comps > 4 && comps < 8)
             comps = is_load ? 8 : 4;
 
-         /* We would need to SIMD split for vec8+ (vec16+ on Xe2+) */
-         comps = MIN2(devinfo->ver >= 20 ? 8 : 4, comps);
+         /* We would need to SIMD split for vec8+ */
+         if (mem_cb_data->info->max_subgroup_size > 16)
+            comps = MIN2(4, comps);
 
          return (nir_mem_access_size_align) {
             .bit_size = 32,
@@ -3356,6 +3358,7 @@ brw_vectorize_lower_mem_access(brw_pass_tracker *pt)
 
    struct brw_mem_access_cb_data cb_data = {
       .devinfo = devinfo,
+      .info = &pt->nir->info,
    };
 
    nir_lower_mem_access_bit_sizes_options mem_access_options = {

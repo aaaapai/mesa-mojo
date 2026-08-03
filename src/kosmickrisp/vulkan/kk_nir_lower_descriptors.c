@@ -459,6 +459,7 @@ try_lower_intrin(nir_builder *b, nir_intrinsic_instr *intrin,
    case nir_intrinsic_image_deref_size:
    case nir_intrinsic_image_deref_samples:
    case nir_intrinsic_image_deref_store_block_agx:
+   case nir_intrinsic_image_deref_levels:
       return lower_image_intrin(b, intrin, ctx);
 
    default:
@@ -518,17 +519,17 @@ lower_tex(nir_builder *b, nir_tex_instr *tex,
    //    return true;
    // }
 
-   // if (tex->op == nir_texop_has_custom_border_color_agx) {
-   //    unsigned offs = offsetof(struct kk_sampled_image_descriptor,
-   //                             clamp_0_sampler_index_or_negative);
+   if (tex->op == nir_texop_has_custom_border_color_agx) {
+      unsigned offs = offsetof(struct kk_sampled_image_descriptor,
+                               clamp_0_sampler_index_or_negative);
 
-   //    nir_def *res = load_resource_deref_desc(
-   //       b, 1, 16, nir_src_as_deref(nir_src_for_ssa(sampler)),
-   //       plane_offset_B + offs, ctx);
+      nir_def *res = load_resource_deref_desc(
+         b, 1, 16, nir_src_as_deref(nir_src_for_ssa(sampler)),
+         plane_offset_B + offs, ctx);
 
-   //    nir_def_replace(&tex->def, nir_ige_imm(b, res, 0));
-   //    return true;
-   // }
+      nir_def_replace(&tex->def, nir_ige_imm(b, res, 0));
+      return true;
+   }
 
    if (tex->op == nir_texop_custom_border_color_agx) {
       unsigned offs = offsetof(struct kk_sampled_image_descriptor, border);
@@ -568,6 +569,11 @@ lower_tex(nir_builder *b, nir_tex_instr *tex,
    if (sampler != NULL) {
       unsigned offs =
          offsetof(struct kk_sampled_image_descriptor, sampler_index);
+
+      bool clamp_to_0 = tex->backend_flags & KK_TEXTURE_FLAG_CLAMP_TO_0;
+      if (clamp_to_0)
+         offs = offsetof(struct kk_sampled_image_descriptor,
+                         clamp_0_sampler_index_or_negative);
 
       nir_def *index = load_resource_deref_desc(
          b, 1, 16, nir_src_as_deref(nir_src_for_ssa(sampler)),

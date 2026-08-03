@@ -573,9 +573,9 @@ dri2_detect_swrast_kopper(_EGLDisplay *disp)
 {
    struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
 
-   /* Kopper won't work on Android without extra platform level support. */
+   /* Kopper won't work on Android without extra platform level support. */ // I want to f__k your mother, why did you do that?
    dri2_dpy->kopper = dri2_dpy->driver_name && !strcmp(dri2_dpy->driver_name, "zink") &&
-                      !debug_get_bool_option("LIBGL_KOPPER_DISABLE", false) && disp->Platform != _EGL_PLATFORM_ANDROID;
+                      !debug_get_bool_option("LIBGL_KOPPER_DISABLE", false);
    dri2_dpy->swrast = (disp->Options.ForceSoftware && !dri2_dpy->kopper && strcmp(dri2_dpy->driver_name, "vmwgfx")) ||
                       !dri2_dpy->driver_name || strstr(dri2_dpy->driver_name, "swrast");
    dri2_dpy->swrast_not_kms = dri2_dpy->swrast && (!dri2_dpy->driver_name || strcmp(dri2_dpy->driver_name, "kms_swrast"));
@@ -828,7 +828,7 @@ dri2_create_screen(_EGLDisplay *disp)
       }
    }
 
-   int screen_fd = dri2_dpy->swrast_not_kms ? -1 : dri2_dpy->fd_render_gpu;
+   int screen_fd = (dri2_dpy->swrast_not_kms dri2_dpy->kopper) ? -1 : dri2_dpy->fd_render_gpu;
    dri2_dpy->dri_screen_render_gpu = driCreateNewScreen3(
       0, screen_fd, dri2_dpy->loader_extensions, type,
       &dri2_dpy->driver_configs, false, dri2_dpy->multibuffers_available, disp);

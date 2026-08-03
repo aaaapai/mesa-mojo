@@ -395,7 +395,8 @@ brw_write_shader_relocs(const struct brw_isa_info *isa,
 }
 
 unsigned
-ptl_register_blocks(unsigned grf_used)
+brw_register_blocks(const struct intel_device_info *devinfo,
+                    unsigned grf_used)
 {
    if (INTEL_DEBUG(DEBUG_NO_VRT))
       return (BRW_MAX_GRF / 32) - 1;

@@ -2288,7 +2288,7 @@ impl fmt::Display for MemAddrType {
     }
 }
 
-#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum MemType {
     U8,
     I8,
@@ -6570,6 +6570,33 @@ impl DisplayOp for OpLdc {
 }
 impl_display_for_op!(OpLdc);
 
+#[repr(C)]
+#[derive(Clone, SrcsAsSlice, DstsAsSlice)]
+pub struct OpLdcg {
+    pub dst: Dst,
+
+    #[src_type(GPR)]
+    pub addr: Src,
+
+    /// On true the load returns 0
+    #[src_type(Pred)]
+    pub pred: Src,
+
+    pub offset: i64,
+    pub mem_type: MemType,
+}
+
+impl DisplayOp for OpLdcg {
+    fn fmt_op(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ldcg{} [{}", self.mem_type, self.addr)?;
+        if self.offset > 0 {
+            write!(f, "+{:#x}", self.offset)?;
+        }
+        write!(f, "], {}", self.pred)
+    }
+}
+impl_display_for_op!(OpLdcg);
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum LdsmSize {
     M8N8,
@@ -8012,6 +8039,20 @@ impl DisplayOp for OpOutFinal {
 }
 impl_display_for_op!(OpOutFinal);
 
+#[repr(C)]
+#[derive(SrcsAsSlice, DstsAsSlice)]
+pub struct OpNanosleep {
+    #[src_type(SSA)]
+    pub time: Src,
+}
+
+impl DisplayOp for OpNanosleep {
+    fn fmt_op(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "nanosleep {}", self.time)
+    }
+}
+impl_display_for_op!(OpNanosleep);
+
 /// Describes an annotation on an instruction.
 #[repr(C)]
 #[derive(SrcsAsSlice, DstsAsSlice)]
@@ -8114,6 +8155,7 @@ pub enum Op {
     SuStGa(Box<OpSuStGa>),
     Ld(Box<OpLd>),
     Ldc(Box<OpLdc>),
+    Ldcg(Box<OpLdcg>),
     LdSharedLock(Box<OpLdSharedLock>),
     St(Box<OpSt>),
     StSCheckUnlock(Box<OpStSCheckUnlock>),
@@ -8163,6 +8205,7 @@ pub enum Op {
     RegOut(Box<OpRegOut>),
     Out(Box<OpOut>),
     OutFinal(Box<OpOutFinal>),
+    Nanosleep(Box<OpNanosleep>),
     Annotate(Box<OpAnnotate>),
 }
 impl_display_for_op!(Op);
@@ -8289,6 +8332,7 @@ impl Op {
             // Memory ops
             Op::Ld(_)
             | Op::Ldc(_)
+            | Op::Ldcg(_)
             | Op::LdSharedLock(_)
             | Op::St(_)
             | Op::StSCheckUnlock(_)
@@ -8334,7 +8378,8 @@ impl Op {
             | Op::Kill(_)
             | Op::PixLd(_)
             | Op::S2R(_)
-            | Op::Match(_) => false,
+            | Op::Match(_)
+            | Op::Nanosleep(_) => false,
             Op::Nop(_) | Op::Vote(_) => true,
 
             // Virtual ops
@@ -8370,6 +8415,7 @@ impl Op {
                 | Op::Cont(_)
                 | Op::PCnt(_)
                 | Op::Bra(_)
+                | Op::Nanosleep(_)
                 | Op::Exit(_)
         )
     }
@@ -8474,6 +8520,7 @@ impl Op {
             // Memory ops
             Op::Ld(_)
             | Op::Ldc(_)
+            | Op::Ldcg(_)
             | Op::LdSharedLock(_)
             | Op::St(_)
             | Op::StSCheckUnlock(_)
@@ -8519,7 +8566,8 @@ impl Op {
             | Op::S2R(_)
             | Op::Match(_)
             | Op::Nop(_)
-            | Op::Vote(_) => false,
+            | Op::Vote(_)
+            | Op::Nanosleep(_) => false,
 
             // Virtual ops
             Op::Undef(_)
@@ -8909,6 +8957,7 @@ impl Instr {
             | Op::Out(_)
             | Op::OutFinal(_)
             | Op::Isbewr(_)
+            | Op::Nanosleep(_)
             | Op::Annotate(_) => false,
             Op::BMov(op) => !op.clear,
             _ => true,
@@ -8923,7 +8972,7 @@ impl Instr {
     }
 
     pub fn needs_yield(&self) -> bool {
-        matches!(&self.op, Op::Bar(_) | Op::BSync(_))
+        matches!(&self.op, Op::Bar(_) | Op::BSync(_) | Op::Nanosleep(_))
     }
 
     fn fmt_pred(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -9018,6 +9067,7 @@ impl Instr {
             | Op::SuStGa(_)
             | Op::Ld(_)
             | Op::Ldc(_)
+            | Op::Ldcg(_)
             | Op::LdSharedLock(_)
             | Op::St(_)
             | Op::StSCheckUnlock(_)
@@ -9067,6 +9117,7 @@ impl Instr {
             | Op::RegOut(_)
             | Op::Out(_)
             | Op::OutFinal(_)
+            | Op::Nanosleep(_)
             | Op::Annotate(_) => false,
         }
     }

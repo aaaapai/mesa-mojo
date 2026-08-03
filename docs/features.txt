@@ -464,7 +464,7 @@ Vulkan 1.1 -- all DONE: anv, hk, kk, lvp, nvk, panvk, pvr, radv, tu, vn
   VK_KHR_storage_buffer_storage_class                   DONE (anv, dzn, hasvk, lvp, nvk, panvk, pvr, radv, tu, v3dv, vn)
   VK_KHR_variable_pointers                              DONE (anv, hasvk, lvp, nvk, panvk, radv, tu, v3dv, vn)
 
-Vulkan 1.2 -- all DONE: anv, hk, nvk, panvk/v10+, pvr, tu, vn
+Vulkan 1.2 -- all DONE: anv, hk, nvk, panvk, pvr, tu, vn
 
   VK_KHR_8bit_storage                                   DONE (anv, dzn, hasvk, kk, lvp, nvk, panvk, radv, tu/a750+, v3dv, vn)
   VK_KHR_buffer_device_address                          DONE (anv, dzn, hasvk, kk, lvp, nvk, panvk, pvr, radv, tu, v3dv, vn)
@@ -480,7 +480,7 @@ Vulkan 1.2 -- all DONE: anv, hk, nvk, panvk/v10+, pvr, tu, vn
   VK_KHR_shader_float16_int8                            DONE (anv, dzn, hasvk, kk, lvp, nvk, panvk, radv, tu, v3dv/vc7+, vn)
   VK_KHR_shader_float_controls                          DONE (anv, dzn, hasvk, kk, lvp, nvk, panvk, pvr, radv, tu, v3dv, vn)
   VK_KHR_shader_subgroup_extended_types                 DONE (anv, hasvk, kk, lvp, nvk, panvk, pvr, radv, tu, v3dv, vn)
-  VK_KHR_spirv_1_4                                      DONE (anv, dzn, hasvk, kk, lvp, nvk, panvk/v10+, pvr, radv, tu, v3dv, vn)
+  VK_KHR_spirv_1_4                                      DONE (anv, dzn, hasvk, kk, lvp, nvk, panvk, pvr, radv, tu, v3dv, vn)
   VK_KHR_timeline_semaphore                             DONE (anv, dzn, hasvk, kk, lvp, nvk, panvk, pvr, radv, tu, v3dv, vn)
   VK_KHR_uniform_buffer_standard_layout                 DONE (anv, dzn, hasvk, kk, lvp, nvk, panvk, pvr, radv, tu, v3dv, vn)
   VK_KHR_vulkan_memory_model                            DONE (anv, hasvk, kk, lvp, nvk, panvk, radv, tu, v3dv, vn)
@@ -491,7 +491,7 @@ Vulkan 1.2 -- all DONE: anv, hk, nvk, panvk/v10+, pvr, tu, vn
   VK_EXT_separate_stencil_usage                         DONE (anv, dzn, hasvk, kk, lvp, nvk, panvk, pvr, radv, tu, v3dv, vn)
   VK_EXT_shader_viewport_index_layer                    DONE (anv, hasvk, kk, lvp, nvk, radv, tu, vn)
 
-Vulkan 1.3 -- all DONE: anv, hk, kk, lvp, nvk, panvk/v10+, radv, tu, vn, v3dv
+Vulkan 1.3 -- all DONE: anv, hk, kk, lvp, nvk, panvk, radv, tu, vn, v3dv
 
   VK_KHR_copy_commands2                                 DONE (anv, hasvk, lvp, nvk, panvk, pvr, radv, tu, v3dv, vn)
   VK_KHR_dynamic_rendering                              DONE (anv, dzn, hasvk, lvp, nvk, panvk, pvr, radv, tu, v3dv, vn)
@@ -525,7 +525,7 @@ Vulkan 1.4 -- all DONE: anv, hk, lvp, nvk, panvk/v10+, radv/gfx8+, tu/a7xx+, vn
   VK_KHR_line_rasterization                             DONE (anv, kk, lvp, nvk, panvk, pvr, radv, tu, v3dv, vn)
   VK_KHR_load_store_op_none                             DONE (anv, kk, lvp, nvk, panvk, radv, tu, v3dv, vn)
   VK_KHR_maintenance5                                   DONE (anv, hasvk, kk, lvp, nvk, panvk, pvr, radv, tu, v3dv, vn)
-  VK_KHR_maintenance6                                   DONE (anv, hasvk, kk, lvp, nvk, panvk/v10+, radv, tu, vn)
+  VK_KHR_maintenance6                                   DONE (anv, hasvk, kk, lvp, nvk, panvk, radv, tu, vn)
   VK_KHR_map_memory2                                    DONE (anv, kk, lvp, nvk, panvk, pvr, radv, tu, vn)
   VK_KHR_push_descriptor                                DONE (anv, hasvk, kk, lvp, nvk, panvk, radv, tu, vn)
   VK_KHR_shader_expect_assume                           DONE (anv, dzn, hasvk, kk, lvp, nvk, panvk, pvr, radv, tu, v3dv, vn)
@@ -632,7 +632,7 @@ Khronos extensions that are not part of any Vulkan version:
   VK_EXT_device_address_binding_report                  DONE (anv, panvk, radv, tu)
   VK_EXT_device_fault                                   DONE (radv)
   VK_EXT_device_generated_commands                      DONE (anv, lvp, nvk/Turing+, radv/gfx8+)
-  VK_EXT_device_memory_report                           DONE (anv, panvk, pvr, radv, tu, vn)
+  VK_EXT_device_memory_report                           DONE (anv, panvk, pvr, radv, tu, v3dv, vn)
   VK_EXT_direct_mode_display                            DONE (anv, hasvk, hk, kk, lvp, nvk, panvk, pvr, radv, tu, v3dv, vn)
   VK_EXT_discard_rectangles                             DONE (nvk, radv)
   VK_EXT_display_control                                DONE (anv, hasvk, nvk, panvk, pvr, radv, tu)
