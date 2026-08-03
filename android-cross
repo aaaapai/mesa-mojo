@@ -1,7 +1,7 @@
 [binaries]
 ar = '$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar'
-c = ['ccache', '$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang']
-cpp = ['ccache', '$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang++']
+c = ['ccache', '$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang']
+cpp = ['ccache', '$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang++']
 nm = '$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm'
 llvm-config = '$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-config'
 ld = '$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/lld'
@@ -16,9 +16,9 @@ c_host = '$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aar
 cpp_host = '$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang++'
 
 [built-in options]
-c_args = ['-D_LIB', '-DNOMINMAX', '-D_USE_MATH_DEFINES', '-D__STDC_NO_THREADS__', '-D__STDC_LIMIT_MACROS', '-D__STDC_FORMAT_MACROS', '-D__STDC_CONSTANT_MACROS', '-DUTIL_ARCH_LITTLE_ENDIAN', '-DUNIX', '-DANDROID', '-O3', '-DVK_USE_PLATFORM_ANDROID_KHR', '-DHAVE_OPENGL', '-DHAVE_OPENGL_ES_2', '-DHAVE_OPENGL_ES_3', '-DHAVE_OPENGL_ES_1', '-fPIC', '-DPIC', '-fwhole-program-vtables', '-mllvm', '-polly', '-flto=thin', '-fdata-sections', '-ffunction-sections', '-fmerge-all-constants', '-march=armv8-a+simd', '-DHAVE_STRUCT_TIMESPEC', '-I/tmp/build/include', '-Wno-macro-redefined', '-I/tmp/build/include/libdrm', '-I${PWD}/src/mesa', '-I${PWD}/src/util', '-I$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include', '-Wno-error']
+c_args = ['-DANDROID', '-O3', '-DVK_USE_PLATFORM_ANDROID_KHR', '-DHAVE_OPENGL', '-fPIC', '-DPIC', '-fwhole-program-vtables', '-mllvm', '-polly', '-flto=thin', '-fdata-sections', '-ffunction-sections', '-fmerge-all-constants', '-march=armv8-a+simd', '-DHAVE_STRUCT_TIMESPEC', '-I/tmp/build/include', '-Wno-macro-redefined', '-I/tmp/build/include/libdrm', '-I${PWD}/src/mesa', '-I${PWD}/src/util', '-I$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include', '-Wno-error']
 c_link_args = ['-ldl', '-flto=thin', '-fuse-ld=lld', '-L/tmp/build/lib', '-L/tmp/build/lib/libdrm', '-L${PWD}/mesa_deps/spirv-tools']
-cpp_args = ['-DHAVE_OPENGL_ES_2', '-DHAVE_OPENGL_ES_3', '-DHAVE_OPENGL_ES_1', '-D_LIB', '-DNOMINMAX', '-D_USE_MATH_DEFINES', '-D__STDC_NO_THREADS__', '-D__STDC_LIMIT_MACROS', '-D__STDC_FORMAT_MACROS', '-D__STDC_CONSTANT_MACROS', '-DUTIL_ARCH_LITTLE_ENDIAN', '-DUNIX', '-DANDROID', '-O3', '-DVK_USE_PLATFORM_ANDROID_KHR', '-DHAVE_OPENGL', '-fPIC', '-DPIC', '-fwhole-program-vtables', '-mllvm', '-polly', '-flto=thin', '-fdata-sections', '-ffunction-sections', '-fmerge-all-constants', '-march=armv8-a+simd', '-DHAVE_STRUCT_TIMESPEC', '-I/tmp/build/include', '-Wno-macro-redefined', '-I/tmp/build/include/libdrm', '-Wno-error', '-I$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include']
+cpp_args = ['-DANDROID', '-O3', '-DVK_USE_PLATFORM_ANDROID_KHR', '-DHAVE_OPENGL', '-fPIC', '-DPIC', '-fwhole-program-vtables', '-mllvm', '-polly', '-flto=thin', '-fdata-sections', '-ffunction-sections', '-fmerge-all-constants', '-march=armv8-a+simd', '-DHAVE_STRUCT_TIMESPEC', '-I/tmp/build/include', '-Wno-macro-redefined', '-I/tmp/build/include/libdrm', '-Wno-error', '-I$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include']
 cpp_link_args = ['-ldl', '-flto=thin', '-fuse-ld=lld', '-lc++_static', '-lc++abi', '-L/tmp/build/lib', '-L/tmp/build/lib/libdrm', '-L${PWD}/mesa_deps/spirv-tools']
 # c_args = ['-DANDROID', '-O0', '-DVK_USE_PLATFORM_ANDROID_KHR', '-DHAVE_OPENGL', '-fPIC', '-DPIC', '-g3' ,'-funwind-tables' ,'-fno-optimize-sibling-calls', '-DHAVE_STRUCT_TIMESPEC', '-DHAS_SCHED_H', '-I/tmp/build/include', '-Wno-macro-redefined', '-I/tmp/build/include/libdrm', '-I$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include']
 # c_link_args = ['-ldl', '-fuse-ld=lld', '-L/tmp/build/lib', '-L/tmp/build/lib/libdrm', '-L${PWD}/mesa_deps/spirv-tools']
@@ -27,7 +27,6 @@ cpp_link_args = ['-ldl', '-flto=thin', '-fuse-ld=lld', '-lc++_static', '-lc++abi
 
 [properties]
 skip_sanity_check = true
-sys_root = '$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot'
 cpp_rtti = true
 
 [host_machine]
