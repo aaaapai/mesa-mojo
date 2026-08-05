@@ -31,7 +31,7 @@
 #include "util/u_math.h"
 #include "util/vma.h"
 
-#include "freedreno_common.h"
+#include "../common/freedreno_common.h"
 #include "freedreno_dev_info.h"
 #include "freedreno_drmif.h"
 #include "freedreno_rd_output.h"
