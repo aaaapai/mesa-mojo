@@ -74,7 +74,30 @@
 #endif
 
 #ifdef HAVE_FREEDRENO_KGSL
-#include "../freedreno/drm/kgsl/kgsl_priv.h"
+/* KGSL ioctl definitions for device detection */
+#ifndef KGSL_IOCTL_GETPROPERTY
+#define KGSL_IOCTL_BASE 0x09
+#define KGSL_IOCTL_GETPROPERTY _IOWR(KGSL_IOCTL_BASE, 0x12, struct kgsl_device_getproperty)
+
+struct kgsl_devinfo {
+   unsigned int device_id;
+   unsigned int chip_id;
+   unsigned int mmu_enabled;
+   unsigned int gmem_sizebytes;
+   unsigned int gpu_installed;
+   unsigned int max_gpu_clk;
+   unsigned int gpu_pwrlevels;
+   unsigned int id;
+};
+
+struct kgsl_device_getproperty {
+   unsigned int type;
+   void *value;
+   unsigned int sizebytes;
+};
+
+#define KGSL_PROP_DEVICE_INFO 0x01
+#endif
 #endif
 
 static void default_logger(int level, const char *fmt, ...)
