@@ -304,7 +304,21 @@ bool
 loader_is_device_render_capable(int fd)
 {
    drmDevicePtr dev_ptr;
-   bool ret;
+   bool ret = false;
+
+#ifdef HAVE_FREEDRENO_KGSL
+   /* 检测是否为 kgsl 设备 */
+   struct kgsl_devinfo info;
+   struct kgsl_device_getproperty prop = {
+      .type = KGSL_PROP_DEVICE_INFO,
+      .value = &info,
+      .sizebytes = sizeof(info),
+   };
+   if (ioctl(fd, KGSL_IOCTL_GETPROPERTY, &prop) == 0) {
+      /* 是 kgsl 设备，可视为渲染能力 */
+      return true;
+   }
+#endif
 
    if (drmGetDevice2(fd, 0, &dev_ptr) != 0)
       return false;
