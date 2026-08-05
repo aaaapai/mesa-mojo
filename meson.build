@@ -359,6 +359,10 @@ with_vdrm = [
   with_intel_virtio,
 ].contains(true)
 
+if freedreno_kmds.contains('kgsl')
+  pre_args += '-DHAVE_FREEDRENO_KGSL'
+endif
+
 if with_virtio_vk
   dep_venus_protocol = dependency('venus-protocol',
     version : '== 1.0',
