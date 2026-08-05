@@ -5,7 +5,7 @@
 #define __user
 #endif
 
-#include "freedreno_priv.h"
+#include "../freedreno_priv.h"
 
 /* KGSL kernel interface (from turnip) */
 #include "../../vulkan/msm_kgsl.h"
