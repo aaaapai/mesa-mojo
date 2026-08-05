@@ -54,6 +54,65 @@
 #include "platform_android.h"
 #include "dri_util.h"
 
+/* KGSL ioctl definitions for device detection */
+#ifndef KGSL_IOCTL_GETPROPERTY
+#define KGSL_IOCTL_BASE 0x09
+#define KGSL_IOCTL_GETPROPERTY _IOWR(KGSL_IOCTL_BASE, 0x12, struct kgsl_device_getproperty)
+
+struct kgsl_devinfo {
+   unsigned int device_id;
+   unsigned int chip_id;
+   unsigned int mmu_enabled;
+   unsigned int gmem_sizebytes;
+   unsigned int gpu_installed;
+   unsigned int max_gpu_clk;
+   unsigned int gpu_pwrlevels;
+   unsigned int id;
+};
+
+struct kgsl_device_getproperty {
+   unsigned int type;
+   void *value;
+   unsigned int sizebytes;
+};
+
+#define KGSL_PROP_DEVICE_INFO 0x01
+#endif
+
+static bool
+droid_is_kgsl_fd(int fd)
+{
+   struct kgsl_devinfo info;
+   struct kgsl_device_getproperty prop = {
+      .type = KGSL_PROP_DEVICE_INFO,
+      .value = &info,
+      .sizebytes = sizeof(info),
+   };
+   int ret = ioctl(fd, KGSL_IOCTL_GETPROPERTY, &prop);
+   return ret == 0;
+}
+
+static EGLBoolean
+droid_open_device_kgsl(_EGLDisplay *disp, bool swrast)
+{
+   struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
+   static const char path[] = "/dev/kgsl-3d0";
+
+   dri2_dpy->fd_render_gpu = loader_open_device(path);
+   if (dri2_dpy->fd_render_gpu < 0) {
+      _eglLog(_EGL_WARNING, "Failed to open kgsl device");
+      return EGL_FALSE;
+   }
+
+   if (!droid_is_kgsl_fd(dri2_dpy->fd_render_gpu)) {
+      close(dri2_dpy->fd_render_gpu);
+      dri2_dpy->fd_render_gpu = -1;
+      return EGL_FALSE;
+   }
+
+   return EGL_TRUE;
+}
+
 static struct dri_image *
 droid_create_image_from_buffer_info(
    struct dri2_egl_display *dri2_dpy, int width, int height,
@@ -1148,20 +1207,25 @@ droid_load_driver(_EGLDisplay *disp, bool swrast)
 {
    struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
 
-   if (disp->Options.Zink)
+   if (disp->Options.Zink) {
       dri2_dpy->driver_name = strdup("zink");
-   else
-      dri2_dpy->driver_name = loader_get_driver_for_fd(dri2_dpy->fd_render_gpu);
+   } else {
+      /* 检查 fd 是否为 kgsl */
+      if (dri2_dpy->fd_render_gpu >= 0 && droid_is_kgsl_fd(dri2_dpy->fd_render_gpu)) {
+         dri2_dpy->driver_name = strdup("freedreno");
+      } else {
+         dri2_dpy->driver_name = loader_get_driver_for_fd(dri2_dpy->fd_render_gpu);
+      }
+   }
    if (dri2_dpy->driver_name == NULL)
       return false;
 
    if (swrast && !disp->Options.Zink) {
-      /* Use kms swrast only with vgem / virtio_gpu.
-       * virtio-gpu fallbacks to software rendering when 3D features
-       * are unavailable since 6c5ab.
-       */
-      if (strcmp(dri2_dpy->driver_name, "vgem") == 0 ||
-          strcmp(dri2_dpy->driver_name, "virtio_gpu") == 0) {
+      /* 如果是 freedreno，保留，不转换为软件驱动 */
+      if (strcmp(dri2_dpy->driver_name, "freedreno") == 0) {
+         /* keep */
+      } else if (strcmp(dri2_dpy->driver_name, "vgem") == 0 ||
+                 strcmp(dri2_dpy->driver_name, "virtio_gpu") == 0) {
          free(dri2_dpy->driver_name);
          dri2_dpy->driver_name = strdup("kms_swrast");
       } else {
@@ -1247,6 +1311,18 @@ droid_open_device(_EGLDisplay *disp, bool swrast)
    if (__system_property_get("drm.gpu.vendor_name", vendor_buf) > 0)
       vendor_name = vendor_buf;
 
+   /* 检查是否通过环境变量强制使用 kgsl */
+   const char *override = getenv("MESA_LOADER_DRIVER_OVERRIDE");
+   if (override && strcmp(override, "kgsl") == 0) {
+      if (droid_open_device_kgsl(disp, swrast)) {
+         /* 成功打开 kgsl，直接返回，不再尝试 DRM */
+         return EGL_TRUE;
+      }
+      /* 若 kgsl 打开失败，则继续尝试 DRM */
+      _eglLog(_EGL_WARNING, "kgsl open failed, falling back to DRM");
+   }
+
+   /* 以下是原有的 DRM 设备枚举逻辑 */
    while (dev_list) {
       if (!_eglDeviceSupports(dev_list, _EGL_DEVICE_DRM))
          goto next;
