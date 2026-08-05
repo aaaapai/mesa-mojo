@@ -13,9 +13,9 @@
 #include "util/u_atomic.h"
 #include "util/u_debug.h"
 
-#include "common/fd_hw_common.h"
+#include "../common/fd_hw_common.h"
 #include "freedreno_drmif.h"
-#include "freedreno_pm4.h"
+#include "../common/freedreno_pm4.h"
 
 #ifdef __cplusplus
 extern "C" {
