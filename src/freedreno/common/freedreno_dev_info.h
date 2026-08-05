@@ -21,6 +21,9 @@ extern "C" {
  */
 
 struct fd_dev_info {
+   bool alias_mova_quirk;
+   bool alias_predication_quirk;
+
    uint8_t chip;
 
    /* alignment for size of tiles */
