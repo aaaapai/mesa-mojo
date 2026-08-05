@@ -261,7 +261,7 @@ fd_dbg(void)
    return debug_get_option_libgl();
 }
 
-uint32_t
+static uint32_t
 fd_get_features(struct fd_device *dev)
 {
    return dev->features;
