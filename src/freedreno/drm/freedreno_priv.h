@@ -32,9 +32,9 @@
 #include "util/vma.h"
 
 #include "../common/freedreno_common.h"
-#include "freedreno_dev_info.h"
+#include "../common/freedreno_dev_info.h"
 #include "freedreno_drmif.h"
-#include "freedreno_rd_output.h"
+#include "../common/freedreno_rd_output.h"
 #include "freedreno_ringbuffer.h"
 
 extern simple_mtx_t table_lock;
