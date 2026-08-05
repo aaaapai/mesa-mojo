@@ -79,7 +79,7 @@ jobs:
             -Dvalgrind=disabled \
             -Dgallium-rusticl=false \
             -Dgallium-va=false \
-            -Dfreedreno_kmds=kgsl \
+            -Dfreedreno-kmds=kgsl,msm \
             -Dshared-glapi=enabled
           meson compile -C "build-android" -j 6
           meson install -C "build-android"
