@@ -98,18 +98,22 @@ droid_open_device_kgsl(_EGLDisplay *disp, bool swrast)
    struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
    static const char path[] = "/dev/kgsl-3d0";
 
-   dri2_dpy->fd_render_gpu = loader_open_device(path);
-   if (dri2_dpy->fd_render_gpu < 0) {
+   int fd = open(path, O_RDWR | O_CLOEXEC);
+   if (fd < 0) {
+      fd = loader_open_device(path);
+   }
+
+   if (fd < 0) {
       _eglLog(_EGL_WARNING, "Failed to open kgsl device");
       return EGL_FALSE;
    }
 
-   if (!droid_is_kgsl_fd(dri2_dpy->fd_render_gpu)) {
-      close(dri2_dpy->fd_render_gpu);
-      dri2_dpy->fd_render_gpu = -1;
+   if (!droid_is_kgsl_fd(fd)) {
+      close(fd);
       return EGL_FALSE;
    }
 
+   dri2_dpy->fd_render_gpu = fd;
    return EGL_TRUE;
 }
 
