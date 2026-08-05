@@ -1435,7 +1435,8 @@ dri2_initialize_android(_EGLDisplay *disp)
 
    dri2_dpy->fd_display_gpu = dri2_dpy->fd_render_gpu;
 
-   if (!dri2_dpy->pure_swrast && !dri2_setup_device(disp, false)) {
+   bool is_kgsl = (dri2_dpy->fd_render_gpu >= 0 && droid_is_kgsl_fd(dri2_dpy->fd_render_gpu));
+   if (!dri2_dpy->pure_swrast && !is_kgsl && !dri2_setup_device(disp, false)) {
       err = "DRI2: failed to setup EGLDevice";
       goto cleanup;
    }
