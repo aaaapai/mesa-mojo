@@ -1920,7 +1920,7 @@ skip_smem_offset_align(opt_ctx& ctx, SMEM_instruction* smem, uint32_t align)
          continue;
 
       if (new_op.isTemp()) {
-         op.setTemp(op.getTemp());
+         op.setTemp(new_op.getTemp());
       } else {
          assert(new_op.isFixed());
          op = new_op;
@@ -2545,9 +2545,6 @@ extract_apply_extract(opt_ctx& ctx, aco_ptr<Instruction>& instr)
 void
 label_instruction(opt_ctx& ctx, aco_ptr<Instruction>& instr)
 {
-   if (instr->isSMEM())
-      smem_combine(ctx, instr);
-
    for (unsigned i = 0; i < instr->operands.size(); i++) {
       if (!instr->operands[i].isTemp())
          continue;
@@ -2695,6 +2692,9 @@ label_instruction(opt_ctx& ctx, aco_ptr<Instruction>& instr)
          }
       }
    }
+
+   if (instr->isSMEM())
+      smem_combine(ctx, instr);
 
    /* SALU / VALU: propagate inline constants, temps, and imod */
    if (instr->isSALU() || instr->isVALU()) {

@@ -31,6 +31,7 @@ mod repair_ssa;
 mod small_constants;
 mod spill;
 mod ssa_value;
+mod stats;
 mod swizzle;
 mod validate;
 mod widen_alu_ops;
@@ -77,4 +78,9 @@ mod debug {
     pub static DEBUG: Debug = Debug {
         flags: std::sync::OnceLock::new(),
     };
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn kraid_get_compiler_flags() -> u32 {
+    debug::DEBUG.bits().into()
 }

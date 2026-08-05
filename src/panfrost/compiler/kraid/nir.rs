@@ -1465,7 +1465,10 @@ impl<'a> ShaderFromNir<'a> {
                         // TODO: Scheduling barrier
                     }
                     SCOPE_WORKGROUP => {
-                        assert_eq!(self.nir.info.stage(), MESA_SHADER_COMPUTE);
+                        assert!(matches!(
+                            self.nir.info.stage(),
+                            MESA_SHADER_COMPUTE | MESA_SHADER_KERNEL
+                        ));
                         b.push_op(OpBarrier {});
                     }
                     _ => panic!("Unsupported barrier scope"),
@@ -1621,6 +1624,7 @@ impl<'a> ShaderFromNir<'a> {
                 b.push_op(OpLoad {
                     dst,
                     dst_type: DataType::i(bits),
+                    is_tls: (intrin.access() & ACCESS_INCLUDE_HELPERS) != 0,
                     access: mem_access_from_nir(intrin),
                     addr,
                     offset: 0,
@@ -1754,7 +1758,8 @@ impl<'a> ShaderFromNir<'a> {
                 });
                 self.info.has_ld_gclk = true;
             }
-            nir_intrinsic_store_global => {
+            nir_intrinsic_store_global
+            | nir_intrinsic_store_global_psiz_pan => {
                 let bits = srcs[0].bit_size() * srcs[0].num_components();
                 let mut data = self.get_src(&srcs[0]);
                 if bits == 8 {
@@ -1763,8 +1768,12 @@ impl<'a> ShaderFromNir<'a> {
                     data = data.half(0);
                 }
                 let addr = self.get_src(&srcs[1]);
+                let is_psiz =
+                    intrin.intrinsic == nir_intrinsic_store_global_psiz_pan;
                 b.push_op(OpStore {
                     src_type: DataType::i(bits),
+                    is_tls: (intrin.access() & ACCESS_INCLUDE_HELPERS) != 0,
+                    is_psiz,
                     access: mem_access_from_nir(intrin),
                     data,
                     addr,
@@ -1843,21 +1852,115 @@ impl<'a> ShaderFromNir<'a> {
                 ];
                 self.set_ssa(&intrin.def, ssa);
             }
+            nir_intrinsic_load_attr_pan => {
+                assert_eq!(intrin.def.bit_size, intrin.dest_type().bit_size());
+                assert_eq!(intrin.def.num_components, intrin.num_components);
+
+                let num_type = match intrin.dest_type().base_type() {
+                    ALUType::FLOAT => NumericType::Float,
+                    ALUType::INT => NumericType::SignedInteger,
+                    ALUType::UINT => NumericType::UnsignedInteger,
+                    ALUType::INVALID => NumericType::Auto,
+                    _ => panic!("Invalid NIR ALU type"),
+                };
+                let dst_type = DataType::get(
+                    intrin.def.num_components,
+                    num_type,
+                    intrin.def.bit_size,
+                );
+
+                let vertex_index = self.get_src(&srcs[0]);
+                let instance_index = self.get_src(&srcs[1]);
+                let handle = self.get_src(&srcs[2]);
+
+                let dst = self.alloc_ssa(b, &intrin.def).into();
+                b.push_op(OpLdAttr {
+                    dst,
+                    dst_type,
+                    vertex_index,
+                    instance_index,
+                    handle,
+                });
+            }
+            nir_intrinsic_load_vertex_id
+            | nir_intrinsic_load_raw_vertex_id
+            | nir_intrinsic_load_instance_id
+            | nir_intrinsic_load_draw_id
+            | nir_intrinsic_load_layer_id
+            | nir_intrinsic_load_idvs_output_buf_index_pan => {
+                assert_eq!(intrin.def.bit_size, 32);
+                assert_eq!(intrin.def.num_components, 1);
+
+                let reg = match intrin.intrinsic {
+                    nir_intrinsic_load_vertex_id => PreloadReg::VertexId,
+                    nir_intrinsic_load_raw_vertex_id => PreloadReg::VertexId,
+                    nir_intrinsic_load_instance_id => PreloadReg::InstanceId,
+                    nir_intrinsic_load_draw_id => PreloadReg::DrawId,
+                    nir_intrinsic_load_layer_id => PreloadReg::FrameArgLow,
+                    nir_intrinsic_load_idvs_output_buf_index_pan => {
+                        PreloadReg::InternalId
+                    }
+                    _ => unreachable!(),
+                };
+                let ssa = self.preload(b, reg);
+                self.set_ssa(&intrin.def, vec![ssa]);
+            }
+            nir_intrinsic_load_view_index => {
+                // v14+ is the only architecture supporting multiview directly
+                // others lower VS multiview in NIR
+                let reg = if self.nir.info.stage() == MESA_SHADER_VERTEX {
+                    assert!(b.arch() >= 14);
+                    PreloadReg::ViewId
+                } else {
+                    PreloadReg::FrameArgLow
+                };
+                let ssa = self.preload(b, reg);
+                self.set_ssa(&intrin.def, vec![ssa]);
+            }
+            nir_intrinsic_load_shader_output_pan => {
+                assert_eq!(intrin.def.bit_size, 32);
+                assert_eq!(intrin.def.num_components, 1);
+                let fau = self.special_fau(SpecialFAU::ShaderOutput);
+                let dst = b.copy_i32(fau.word(0).into());
+                self.set_ssa(&intrin.def, vec![dst]);
+            }
             nir_intrinsic_load_push_constant => {
                 assert!(intrin.base() == 0);
                 assert!(intrin.range() == 0);
-                let offset =
-                    srcs[0].as_uint().expect("No indirect push constants");
-                assert!((offset % 4) == 0, "Unaligned push constant");
+                let offset: u16 = srcs[0]
+                    .as_uint()
+                    .expect("No indirect push constants")
+                    .try_into()
+                    .expect("Out of bounds push constant");
                 let word_idx = offset / 4;
+                let byte = (offset % 4) as u8;
 
                 let dsts = self.alloc_ssa(b, &intrin.def);
-                for (i, dst) in dsts.iter().copied().enumerate() {
-                    let word_idx = (word_idx + i as u64).try_into().unwrap();
-                    b.copy_i32_to(
-                        dst.into(),
-                        FAURef::user_i32(word_idx).into(),
-                    );
+                match intrin.def.bit_size * intrin.def.num_components {
+                    8 => {
+                        b.copy_i8_to(
+                            dsts.into(),
+                            Src::from(FAURef::user_i32(word_idx)).byte(byte),
+                        );
+                    }
+                    16 => {
+                        assert!(offset % 2 == 0, "Unaligned push constant");
+                        b.copy_i16_to(
+                            dsts.into(),
+                            Src::from(FAURef::user_i32(word_idx))
+                                .half(byte / 2),
+                        );
+                    }
+                    _ => {
+                        for (i, dst) in dsts.iter().copied().enumerate() {
+                            assert!(byte == 0, "Unaligned push constant");
+                            let i: u16 = i.try_into().unwrap();
+                            b.copy_i32_to(
+                                dst.into(),
+                                FAURef::user_i32(word_idx + i).into(),
+                            );
+                        }
+                    }
                 }
                 // TODO: update ShaderInfo to keep track of the highest push constant
             }

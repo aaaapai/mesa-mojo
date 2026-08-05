@@ -15,9 +15,9 @@
 #include "git_sha1.h"
 #include "util/mesa-blake3.h"
 #include "util/os_misc.h"
-#include "venus-protocol/vn_protocol_driver_device.h"
 #include "vk_android.h"
 #include "vk_common_entrypoints.h"
+#include "vn_protocol_driver_device.h"
 
 #include "vn_android.h"
 #include "vn_instance.h"
@@ -184,6 +184,10 @@ vn_physical_device_init_features(struct vn_physical_device *physical_dev)
          fragment_shader_barycentric;
       VkPhysicalDeviceFragmentShadingRateFeaturesKHR fragment_shading_rate;
       VkPhysicalDeviceMaintenance7FeaturesKHR maintenance_7;
+      VkPhysicalDeviceMaintenance8FeaturesKHR maintenance_8;
+      VkPhysicalDeviceMaintenance9FeaturesKHR maintenance_9;
+      VkPhysicalDeviceMaintenance10FeaturesKHR maintenance_10;
+      VkPhysicalDeviceMaintenance11FeaturesKHR maintenance_11;
       VkPhysicalDeviceRayQueryFeaturesKHR ray_query;
       VkPhysicalDeviceRayTracingMaintenance1FeaturesKHR
          ray_tracing_maintenance_1;
@@ -359,6 +363,10 @@ vn_physical_device_init_features(struct vn_physical_device *physical_dev)
    VN_ADD_PNEXT_EXT(feats2, FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR, local_feats.fragment_shader_barycentric, exts->KHR_fragment_shader_barycentric);
    VN_ADD_PNEXT_EXT(feats2, FRAGMENT_SHADING_RATE_FEATURES_KHR, local_feats.fragment_shading_rate, exts->KHR_fragment_shading_rate);
    VN_ADD_PNEXT_EXT(feats2, MAINTENANCE_7_FEATURES_KHR, local_feats.maintenance_7, exts->KHR_maintenance7);
+   VN_ADD_PNEXT_EXT(feats2, MAINTENANCE_8_FEATURES_KHR, local_feats.maintenance_8, exts->KHR_maintenance8);
+   VN_ADD_PNEXT_EXT(feats2, MAINTENANCE_9_FEATURES_KHR, local_feats.maintenance_9, exts->KHR_maintenance9);
+   VN_ADD_PNEXT_EXT(feats2, MAINTENANCE_10_FEATURES_KHR, local_feats.maintenance_10, exts->KHR_maintenance10);
+   VN_ADD_PNEXT_EXT(feats2, MAINTENANCE_11_FEATURES_KHR, local_feats.maintenance_11, exts->KHR_maintenance11);
    VN_ADD_PNEXT_EXT(feats2, RAY_QUERY_FEATURES_KHR, local_feats.ray_query, exts->KHR_ray_query);
    VN_ADD_PNEXT_EXT(feats2, RAY_TRACING_MAINTENANCE_1_FEATURES_KHR, local_feats.ray_tracing_maintenance_1, exts->KHR_ray_tracing_maintenance1);
    VN_ADD_PNEXT_EXT(feats2, RAY_TRACING_PIPELINE_FEATURES_KHR, local_feats.ray_tracing_pipeline, exts->KHR_ray_tracing_pipeline);
@@ -640,6 +648,8 @@ vn_physical_device_init_properties(struct vn_physical_device *physical_dev)
          fragment_shader_barycentric;
       VkPhysicalDeviceFragmentShadingRatePropertiesKHR fragment_shading_rate;
       VkPhysicalDeviceMaintenance7PropertiesKHR maintenance_7;
+      VkPhysicalDeviceMaintenance9PropertiesKHR maintenance_9;
+      VkPhysicalDeviceMaintenance10PropertiesKHR maintenance_10;
       VkPhysicalDeviceRayTracingPipelinePropertiesKHR ray_tracing_pipeline;
       VkPhysicalDeviceRobustness2PropertiesKHR robustness_2;
 
@@ -737,6 +747,8 @@ vn_physical_device_init_properties(struct vn_physical_device *physical_dev)
    VN_ADD_PNEXT_EXT(props2, FRAGMENT_SHADER_BARYCENTRIC_PROPERTIES_KHR, local_props.fragment_shader_barycentric, exts->KHR_fragment_shader_barycentric);
    VN_ADD_PNEXT_EXT(props2, FRAGMENT_SHADING_RATE_PROPERTIES_KHR, local_props.fragment_shading_rate, exts->KHR_fragment_shading_rate);
    VN_ADD_PNEXT_EXT(props2, MAINTENANCE_7_PROPERTIES_KHR, local_props.maintenance_7, exts->KHR_maintenance7);
+   VN_ADD_PNEXT_EXT(props2, MAINTENANCE_9_PROPERTIES_KHR, local_props.maintenance_9, exts->KHR_maintenance9);
+   VN_ADD_PNEXT_EXT(props2, MAINTENANCE_10_PROPERTIES_KHR, local_props.maintenance_10, exts->KHR_maintenance10);
    VN_ADD_PNEXT_EXT(props2, RAY_TRACING_PIPELINE_PROPERTIES_KHR, local_props.ray_tracing_pipeline, exts->KHR_ray_tracing_pipeline);
    VN_ADD_PNEXT_EXT(props2, ROBUSTNESS_2_PROPERTIES_KHR, local_props.robustness_2, exts->KHR_robustness2 || exts->EXT_robustness2);
 
@@ -821,6 +833,8 @@ vn_physical_device_init_properties(struct vn_physical_device *physical_dev)
    VN_SET_VK_PROPS_EXT(props, &local_props.fragment_shader_barycentric, exts->KHR_fragment_shader_barycentric);
    VN_SET_VK_PROPS_EXT(props, &local_props.fragment_shading_rate, exts->KHR_fragment_shading_rate);
    VN_SET_VK_PROPS_EXT(props, &local_props.maintenance_7, exts->KHR_maintenance7);
+   VN_SET_VK_PROPS_EXT(props, &local_props.maintenance_9, exts->KHR_maintenance9);
+   VN_SET_VK_PROPS_EXT(props, &local_props.maintenance_10, exts->KHR_maintenance10);
    VN_SET_VK_PROPS_EXT(props, &local_props.ray_tracing_pipeline, exts->KHR_ray_tracing_pipeline);
    VN_SET_VK_PROPS_EXT(props, &local_props.robustness_2, exts->KHR_robustness2 || exts->EXT_robustness2);
 
@@ -907,34 +921,50 @@ vn_physical_device_init_queue_family_properties(
    struct vn_instance *instance = physical_dev->instance;
    struct vn_ring *ring = instance->ring.ring;
    const VkAllocationCallbacks *alloc = &instance->base.vk.alloc;
+   const struct vk_features *supported_feats =
+      &physical_dev->base.vk.supported_features;
    uint32_t count = 0;
 
    vn_call_vkGetPhysicalDeviceQueueFamilyProperties2(
       ring, vn_physical_device_to_handle(physical_dev), &count, NULL);
 
-   const bool can_query_prio =
-      physical_dev->base.vk.supported_features.globalPriorityQuery;
-   VkQueueFamilyProperties2 *props;
-   VkQueueFamilyGlobalPriorityProperties *prio_props = NULL;
+   VkQueueFamilyProperties2 *qfp;
+   VkQueueFamilyGlobalPriorityProperties *qfgpp = NULL;
+   VkQueueFamilyOwnershipTransferPropertiesKHR *qfotp = NULL;
+   VkQueueFamilyOptimalImageTransferGranularityPropertiesKHR *qfoitgp = NULL;
 
    VK_MULTIALLOC(ma);
-   vk_multialloc_add(&ma, &props, __typeof__(*props), count);
-   if (can_query_prio)
-      vk_multialloc_add(&ma, &prio_props, __typeof__(*prio_props), count);
+   vk_multialloc_add(&ma, &qfp, __typeof__(*qfp), count);
+   if (supported_feats->globalPriorityQuery)
+      vk_multialloc_add(&ma, &qfgpp, __typeof__(*qfgpp), count);
+   if (supported_feats->maintenance9)
+      vk_multialloc_add(&ma, &qfotp, __typeof__(*qfotp), count);
+   if (supported_feats->maintenance11)
+      vk_multialloc_add(&ma, &qfoitgp, __typeof__(*qfoitgp), count);
 
    if (!vk_multialloc_zalloc(&ma, alloc, VK_SYSTEM_ALLOCATION_SCOPE_INSTANCE))
       return VK_ERROR_OUT_OF_HOST_MEMORY;
 
    for (uint32_t i = 0; i < count; i++) {
-      props[i].sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2;
-      if (can_query_prio) {
-         prio_props[i].sType =
+      qfp[i].sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2;
+      if (supported_feats->globalPriorityQuery) {
+         qfgpp[i].sType =
             VK_STRUCTURE_TYPE_QUEUE_FAMILY_GLOBAL_PRIORITY_PROPERTIES;
-         props[i].pNext = &prio_props[i];
+         __vk_append_struct(&qfp[i], &qfgpp[i]);
+      }
+      if (supported_feats->maintenance9) {
+         qfotp[i].sType =
+            VK_STRUCTURE_TYPE_QUEUE_FAMILY_OWNERSHIP_TRANSFER_PROPERTIES_KHR;
+         __vk_append_struct(&qfp[i], &qfotp[i]);
+      }
+      if (supported_feats->maintenance11) {
+         qfoitgp[i].sType =
+            VK_STRUCTURE_TYPE_QUEUE_FAMILY_OPTIMAL_IMAGE_TRANSFER_GRANULARITY_PROPERTIES_KHR;
+         __vk_append_struct(&qfp[i], &qfoitgp[i]);
       }
    }
    vn_call_vkGetPhysicalDeviceQueueFamilyProperties2(
-      ring, vn_physical_device_to_handle(physical_dev), &count, props);
+      ring, vn_physical_device_to_handle(physical_dev), &count, qfp);
 
 #if defined(VK_USE_PLATFORM_ANDROID_KHR) && ANDROID_API_LEVEL >= 34
    /* Starting from Android 14 (Android U), framework HWUI has required a
@@ -948,10 +978,10 @@ vn_physical_device_init_queue_family_properties(
 #endif
    physical_dev->emulate_second_queue = -1;
    for (uint32_t i = 0; i < count; i++) {
-      if (props[i].queueFamilyProperties.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+      if (qfp[i].queueFamilyProperties.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
          if (require_second_queue && !VN_DEBUG(NO_SECOND_QUEUE) &&
-             props[i].queueFamilyProperties.queueCount < 2) {
-            props[i].queueFamilyProperties.queueCount = 2;
+             qfp[i].queueFamilyProperties.queueCount < 2) {
+            qfp[i].queueFamilyProperties.queueCount = 2;
             physical_dev->emulate_second_queue = i;
          }
 
@@ -962,8 +992,10 @@ vn_physical_device_init_queue_family_properties(
    if (VN_DEBUG(NO_SPARSE))
       physical_dev->sparse_binding_disabled = true;
 
-   physical_dev->queue_family_properties = props;
-   physical_dev->global_priority_properties = prio_props;
+   physical_dev->qfp = qfp;
+   physical_dev->qfgpp = qfgpp;
+   physical_dev->qfotp = qfotp;
+   physical_dev->qfoitgp = qfoitgp;
    physical_dev->queue_family_count = count;
 
    return VK_SUCCESS;
@@ -1289,6 +1321,10 @@ vn_physical_device_get_passthrough_extensions(
       .KHR_maintenance7 =
          physical_dev->renderer_version >= VK_API_VERSION_1_2 ||
          physical_dev->renderer_extensions.KHR_driver_properties,
+      .KHR_maintenance8 = true,
+      .KHR_maintenance9 = true,
+      .KHR_maintenance10 = true,
+      .KHR_maintenance11 = true,
       .KHR_pipeline_library = true,
       .KHR_ray_query = physical_dev->ray_tracing,
       .KHR_ray_tracing_maintenance1 = physical_dev->ray_tracing,
@@ -1633,7 +1669,7 @@ vn_physical_device_init(struct vn_physical_device *physical_dev)
 
 fail:
    vk_free(alloc, physical_dev->extension_spec_versions);
-   vk_free(alloc, physical_dev->queue_family_properties);
+   vk_free(alloc, physical_dev->qfp);
    return result;
 }
 
@@ -1650,7 +1686,7 @@ vn_physical_device_fini(struct vn_physical_device *physical_dev)
 
    vn_wsi_fini(physical_dev);
    vk_free(alloc, physical_dev->extension_spec_versions);
-   vk_free(alloc, physical_dev->queue_family_properties);
+   vk_free(alloc, physical_dev->qfp);
 
    vn_physical_device_base_fini(&physical_dev->base);
 }
@@ -2046,6 +2082,34 @@ vn_GetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice,
    }
 }
 
+static void
+vn_fill_queue_family_properties(struct vn_physical_device *physical_dev,
+                                VkQueueFamilyProperties2 *props,
+                                uint32_t qfi)
+{
+   VN_COPY_STRUCT_GUTS(props, &physical_dev->qfp[qfi],
+                       sizeof(*physical_dev->qfp));
+
+   vk_foreach_struct(pnext, props->pNext) {
+      switch (pnext->sType) {
+      case VK_STRUCTURE_TYPE_QUEUE_FAMILY_GLOBAL_PRIORITY_PROPERTIES:
+         VN_COPY_STRUCT_GUTS(pnext, &physical_dev->qfgpp[qfi],
+                             sizeof(*physical_dev->qfgpp));
+         break;
+      case VK_STRUCTURE_TYPE_QUEUE_FAMILY_OWNERSHIP_TRANSFER_PROPERTIES_KHR:
+         VN_COPY_STRUCT_GUTS(pnext, &physical_dev->qfotp[qfi],
+                             sizeof(*physical_dev->qfotp));
+         break;
+      case VK_STRUCTURE_TYPE_QUEUE_FAMILY_OPTIMAL_IMAGE_TRANSFER_GRANULARITY_PROPERTIES_KHR:
+         VN_COPY_STRUCT_GUTS(pnext, &physical_dev->qfoitgp[qfi],
+                             sizeof(*physical_dev->qfoitgp));
+         break;
+      default:
+         break;
+      }
+   }
+}
+
 VKAPI_ATTR void VKAPI_CALL
 vn_GetPhysicalDeviceQueueFamilyProperties2(
    VkPhysicalDevice physicalDevice,
@@ -2058,21 +2122,8 @@ vn_GetPhysicalDeviceQueueFamilyProperties2(
    VK_OUTARRAY_MAKE_TYPED(VkQueueFamilyProperties2, out,
                           pQueueFamilyProperties, pQueueFamilyPropertyCount);
    for (uint32_t i = 0; i < physical_dev->queue_family_count; i++) {
-      vk_outarray_append_typed(VkQueueFamilyProperties2, &out, props) {
-         props->queueFamilyProperties =
-            physical_dev->queue_family_properties[i].queueFamilyProperties;
-
-         if (physical_dev->base.vk.supported_features.globalPriorityQuery) {
-            VkQueueFamilyGlobalPriorityProperties *prio_props =
-               vk_find_struct(props->pNext,
-                              QUEUE_FAMILY_GLOBAL_PRIORITY_PROPERTIES);
-            if (prio_props) {
-               void *pnext = prio_props->pNext;
-               *prio_props = physical_dev->global_priority_properties[i];
-               prio_props->pNext = pnext;
-            }
-         }
-      }
+      vk_outarray_append_typed(VkQueueFamilyProperties2, &out, props)
+         vn_fill_queue_family_properties(physical_dev, props, i);
    }
 }
 

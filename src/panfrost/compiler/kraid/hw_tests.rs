@@ -135,7 +135,8 @@ impl RunSingleton {
         let runner = TestRunner::new(DEVICE_DEBUG)?;
 
         let gpu_id = runner.gpu_id();
-        let model = model_for_gpu_id(gpu_id)
+        let gpu_variant = runner.gpu_variant();
+        let model = model_for_gpu_id(gpu_id, gpu_variant)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
         Ok(RunSingleton { model, runner })
@@ -374,6 +375,7 @@ impl<'a> TestShaderBuilder<'a> {
         self.push_op(OpLoad {
             dst: dst.clone().into(),
             dst_type: DataType::get(1, NumericType::Integer, bits),
+            is_tls: false,
             access: MemAccess::None,
             addr: self.data_addr.clone().into(),
             offset: offset.try_into().unwrap(),
@@ -387,6 +389,8 @@ impl<'a> TestShaderBuilder<'a> {
 
         self.push_op(OpStore {
             src_type: DataType::get(1, NumericType::Integer, data.bytes() * 8),
+            is_tls: false,
+            is_psiz: false,
             access: MemAccess::None,
             data: data.into(),
             addr: self.data_addr.clone().into(),

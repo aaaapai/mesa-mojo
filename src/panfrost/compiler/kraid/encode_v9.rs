@@ -385,23 +385,6 @@ fn op_encode_sr_write(op: &impl Opcode, dst: &Dst) -> SrWrite {
     }
 }
 
-fn try_encode_res_table_index(handle: u32) -> Result<u32, &'static str> {
-    let table_idx = handle >> 24;
-    if !(table_idx <= 11 || (table_idx >= 60 && table_idx <= 63)) {
-        return Err("Cannot encode immediate resource table index");
-    }
-    Ok(table_idx & 15)
-}
-
-fn try_encode_res_index(handle: u32, bits: u8) -> Result<u8, &'static str> {
-    assert!(bits <= 8);
-    let res_idx = handle & 0xffffff;
-    if res_idx >= (1 << bits) {
-        return Err("Cannot encode immediate resource index");
-    }
-    Ok(res_idx as u8)
-}
-
 fn instr_fau_page(instr: &Instr) -> Option<u8> {
     let mut page = None;
     for src in instr.srcs() {
@@ -1086,6 +1069,7 @@ impl V9Instr for OpFAdd {
     fn src_supports_imm32(&self, src: &Src, arch: u8, _imm: u32) -> bool {
         ptr_eq(src, &self.srcs[1])
             && self.srcs[0].swizzle.is_none()
+            && self.srcs[0].src_mod.is_none()
             && self.round == FRound::NearestEven
             && self.clamp == FClamp::None
             && FaddImm::is_supported(self.dst_type, arch)
@@ -1635,6 +1619,7 @@ impl V9Instr for OpIAdd {
     }
 
     fn src_supports_imm32(&self, src: &Src, arch: u8, _imm: u32) -> bool {
+        assert!(self.srcs[0].src_mod.is_none());
         ptr_eq(src, &self.srcs[1])
             && self.srcs[0].swizzle.is_none()
             && !self.saturate
@@ -1796,6 +1781,14 @@ impl V9Instr for OpIDpAdd {
 
 impl V9Instr for OpIMul {
     fn get_info(&self, arch: u8) -> Option<V9InstrInfo> {
+        // For 32-bit and smaller types, we have the usual signless integer
+        // rules where it's fine as long as we don't have source modifiers or
+        // widens.  However, since 64-bit multiplies require a word widen, it
+        // doesn't make any sense to claim to support them.
+        if self.dst_type == DataType::I64 {
+            return None;
+        }
+
         V9InstrInfo::from_isa(
             Imul::get_info(self.dst_type.i_as_u(), arch),
             src_map! {
@@ -1806,8 +1799,9 @@ impl V9Instr for OpIMul {
     }
 
     fn encode(&self, e: V9Encoder) -> EncodedInstr {
+        assert_ne!(self.dst_type, DataType::I64);
         e.encode(Imul {
-            variant: self.dst_type.try_into().unwrap(),
+            variant: self.dst_type.i_as_u().try_into().unwrap(),
             dst: op_encode_dst(self, &self.dst),
             src0: op_encode_src(self, &self.srcs[0]),
             src1: op_encode_src(self, &self.srcs[1]),
@@ -1866,6 +1860,45 @@ impl V9Instr for OpIToF32 {
                 round: self.round.into(),
             }),
             _ => unreachable!(),
+        }
+    }
+}
+
+impl V9Instr for OpLdAttr {
+    fn get_info(&self, arch: u8) -> Option<V9InstrInfo> {
+        V9InstrInfo::from_isa(
+            LdAttr::get_info((), arch),
+            src_map! {
+                src0: vertex_index,
+                src1: instance_index,
+                src2: handle,
+            },
+        )
+    }
+
+    fn src_supports_imm32(&self, src: &Src, _arch: u8, imm: u32) -> bool {
+        ptr_eq(src, &self.handle) && ResHandle::from_bits(imm).fits_imm_op(4)
+    }
+
+    fn encode(&self, e: V9Encoder) -> EncodedInstr {
+        if let Ok(attr) = ResHandle::try_from(&self.handle) {
+            assert!(attr.fits_imm_op(4));
+            e.encode(LdAttrImm {
+                message_slot_index: e.get_msg_slot_idx().unwrap(),
+                sr_dst: op_encode_sr_write(self, &self.dst),
+                src0: op_encode_src(self, &self.vertex_index),
+                src1: op_encode_src(self, &self.instance_index),
+                attribute_index: attr.index as u8,
+                attribute_table_index: attr.table,
+            })
+        } else {
+            e.encode(LdAttr {
+                message_slot_index: e.get_msg_slot_idx().unwrap(),
+                sr_dst: op_encode_sr_write(self, &self.dst),
+                src0: op_encode_src(self, &self.vertex_index),
+                src1: op_encode_src(self, &self.instance_index),
+                src2: op_encode_src(self, &self.handle),
+            })
         }
     }
 }
@@ -1970,20 +2003,19 @@ impl V9Instr for OpLdTex {
     }
 
     fn src_supports_imm32(&self, src: &Src, _arch: u8, imm: u32) -> bool {
-        ptr_eq(src, &self.handle)
-            && try_encode_res_index(imm, 4).is_ok()
-            && try_encode_res_table_index(imm).is_ok()
+        ptr_eq(src, &self.handle) && ResHandle::from_bits(imm).fits_imm_op(4)
     }
 
     fn encode(&self, e: V9Encoder) -> EncodedInstr {
-        if let Ok(imm32) = u32::try_from(&self.handle.src_ref) {
+        if let Ok(texture) = ResHandle::try_from(&self.handle) {
+            assert!(texture.fits_imm_op(4));
             e.encode(LdTexImm {
                 message_slot_index: e.get_msg_slot_idx().unwrap(),
                 sr_dst: op_encode_sr_write(self, &self.dst),
                 src0: op_encode_src(self, &self.coords[0]),
                 src1: op_encode_src(self, &self.coords[1]),
-                texture_index: try_encode_res_index(imm32, 4).unwrap(),
-                texture_table_index: try_encode_res_table_index(imm32).unwrap(),
+                texture_index: texture.index as u8,
+                texture_table_index: texture.table,
             })
         } else {
             e.encode(LdTex {
@@ -2009,19 +2041,18 @@ impl V9Instr for OpLeaBuf {
     }
 
     fn src_supports_imm32(&self, src: &Src, _arch: u8, imm: u32) -> bool {
-        ptr_eq(src, &self.handle)
-            && try_encode_res_index(imm, 8).is_ok()
-            && try_encode_res_table_index(imm).is_ok()
+        ptr_eq(src, &self.handle) && ResHandle::from_bits(imm).fits_imm_op(8)
     }
 
     fn encode(&self, e: V9Encoder) -> EncodedInstr {
-        if let Ok(imm32) = u32::try_from(&self.handle.src_ref) {
+        if let Ok(buffer) = ResHandle::try_from(&self.handle) {
+            assert!(buffer.fits_imm_op(8));
             e.encode(LeaBufImm {
                 message_slot_index: e.get_msg_slot_idx().unwrap(),
                 sr_dst: op_encode_sr_write(self, &self.dst),
                 src0: op_encode_src(self, &self.index),
-                buffer_index: try_encode_res_index(imm32, 8).unwrap(),
-                buffer_table_index: try_encode_res_table_index(imm32).unwrap(),
+                buffer_index: buffer.index as u8,
+                buffer_table_index: buffer.table,
             })
         } else {
             e.encode(LeaBuf {
@@ -2068,20 +2099,19 @@ impl V9Instr for OpLeaTex {
     }
 
     fn src_supports_imm32(&self, src: &Src, _arch: u8, imm: u32) -> bool {
-        ptr_eq(src, &self.handle)
-            && try_encode_res_index(imm, 4).is_ok()
-            && try_encode_res_table_index(imm).is_ok()
+        ptr_eq(src, &self.handle) && ResHandle::from_bits(imm).fits_imm_op(4)
     }
 
     fn encode(&self, e: V9Encoder) -> EncodedInstr {
-        if let Ok(imm32) = u32::try_from(&self.handle.src_ref) {
+        if let Ok(texture) = ResHandle::try_from(&self.handle) {
+            assert!(texture.fits_imm_op(4));
             e.encode(LeaTexImm {
                 message_slot_index: e.get_msg_slot_idx().unwrap(),
                 sr_dst: op_encode_sr_write(self, &self.dst),
                 src0: op_encode_src(self, &self.coords[0]),
                 src1: op_encode_src(self, &self.coords[1]),
-                texture_index: try_encode_res_index(imm32, 4).unwrap(),
-                texture_table_index: try_encode_res_table_index(imm32).unwrap(),
+                texture_index: texture.index as u8,
+                texture_table_index: texture.table,
             })
         } else {
             e.encode(LeaTex {
@@ -2168,8 +2198,13 @@ impl V9Instr for OpMkVecV2I16 {
 
 impl V9Instr for OpMov {
     fn get_info(&self, arch: u8) -> Option<V9InstrInfo> {
+        // The ISA doesn'thave MOV.v2i16 but we can fake it for the sake of
+        // being able to do 16-bit copies
+        if !matches!(self.dst_type, DataType::V2I16 | DataType::I32) {
+            return None;
+        }
         V9InstrInfo::from_isa(
-            Mov::get_info(self.dst_type, arch),
+            Mov::get_info(DataType::I32, arch),
             src_map! {
                 src0: src,
             },
@@ -2181,6 +2216,7 @@ impl V9Instr for OpMov {
     }
 
     fn encode(&self, e: V9Encoder) -> EncodedInstr {
+        assert!(matches!(self.dst_type, DataType::V2I16 | DataType::I32));
         if let Some(imm1w) = op_src_as_imm1w(self, &self.src) {
             e.encode(MovImm {
                 variant: self.dst_type.try_into().unwrap(),
@@ -2189,7 +2225,7 @@ impl V9Instr for OpMov {
             })
         } else {
             e.encode(Mov {
-                variant: self.dst_type.try_into().unwrap(),
+                variant: MovVariant::I32,
                 dst: op_encode_dst(self, &self.dst),
                 src0: op_encode_src(self, &self.src),
             })
@@ -2762,6 +2798,7 @@ macro_rules! v9_op_match_else {
             Op::IMul($x) => $y,
             Op::ISub($x) => $y,
             Op::IToF32($x) => $y,
+            Op::LdAttr($x) => $y,
             Op::LdCvt($x) => $y,
             Op::LdExp($x) => $y,
             Op::LdGClk($x) => $y,
@@ -2802,6 +2839,10 @@ fn v9_op_info(op: &Op, arch: u8) -> Option<V9InstrInfo> {
 
 pub fn v9_op_is_supported(op: &Op, arch: u8) -> bool {
     v9_op_match_else!(op, |op| op.get_info(arch).is_some(), false)
+}
+
+pub fn v9_op_exec_unit(op: &Op, arch: u8) -> Option<ExecUnit> {
+    Some(v9_op_info(op, arch)?.isa_info.exec_unit)
 }
 
 pub fn v9_op_is_message(op: &Op, arch: u8) -> bool {
@@ -2894,7 +2935,7 @@ pub fn v9_op_dst_supported_lanes(op: &Op, arch: u8) -> DstLanesSet {
         let dst = &op.dsts()[0];
         let dst_type = op.dst_type(dst);
         let lanes = if dst_type.total_bits() == 16 {
-            DstLanesSet::from_array([ir::DstLanes::H0])
+            DstLanesSet::from_array([ir::DstLanes::AnyH, ir::DstLanes::H0])
         } else {
             debug_assert!(dst_type.total_bits() >= 32);
             DstLanesSet::from_array([ir::DstLanes::All])
@@ -2971,5 +3012,12 @@ pub fn encode_v9(s: &Shader<'_>, arch: u8) -> Vec<u32> {
             ip += INSTR_SIZE;
         }
     }
+
+    if !enc.is_empty() {
+        // Pad to 128 bytes, keeping at least one empty instruction between shaders
+        let new_len = (enc.len() + 1).next_multiple_of(32);
+        enc.resize(new_len, 0);
+    }
+
     enc
 }

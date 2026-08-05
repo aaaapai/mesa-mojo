@@ -110,6 +110,18 @@ panvk_lower_sysvals(nir_builder *b, nir_instr *instr, void *data)
       else
          val = load_sysval(b, graphics, bit_size, layer_id);
       break;
+#else
+   case nir_intrinsic_load_view_index:
+      /* this is usually lowered with nir_lower_multiview, but if
+       * view_mask == 0 we still need something to load.
+       */
+      if (ctx->state->mv->view_mask == 0) {
+         val = nir_imm_zero(b, 1, 32);
+      } else {
+         assert(b->shader->info.stage == MESA_SHADER_FRAGMENT);
+         return false;
+      }
+      break;
 #endif
 
    case nir_intrinsic_load_draw_id:
@@ -192,29 +204,6 @@ panvk_lower_sysvals(nir_builder *b, nir_instr *instr, void *data)
 
    b->cursor = nir_after_instr(instr);
    nir_def_rewrite_uses(&intr->def, val);
-   return true;
-}
-
-static bool
-panvk_lower_load_vs_input(nir_builder *b, nir_intrinsic_instr *intrin,
-                           UNUSED void *data)
-{
-   if (intrin->intrinsic != nir_intrinsic_load_input)
-      return false;
-
-   b->cursor = nir_before_instr(&intrin->instr);
-   nir_def *ld_attr = nir_load_attribute_pan(
-      b, intrin->def.num_components, intrin->def.bit_size,
-      PAN_ARCH < 9 ?
-         nir_load_raw_vertex_id(b) :
-         nir_load_vertex_id(b),
-      nir_load_instance_id(b),
-      nir_get_io_offset_src(intrin)->ssa,
-      .base = nir_intrinsic_base(intrin),
-      .component = nir_intrinsic_component(intrin),
-      .dest_type = nir_intrinsic_dest_type(intrin));
-   nir_def_replace(&intrin->def, ld_attr);
-
    return true;
 }
 
@@ -989,10 +978,6 @@ panvk_compile_nir(struct panvk_device *dev, nir_shader *nir,
 
    /* We're going to modify this so make our own copy to be nicer to callers */
    struct pan_compile_inputs input = *compile_input;
-
-   if (nir->info.stage == MESA_SHADER_VERTEX)
-      NIR_PASS(_, nir, nir_shader_intrinsics_pass, panvk_lower_load_vs_input,
-               nir_metadata_control_flow, NULL);
 
    pan_postprocess_nir(nir, &input, &shader->info);
 

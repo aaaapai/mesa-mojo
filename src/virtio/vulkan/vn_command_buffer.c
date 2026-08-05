@@ -10,9 +10,9 @@
 
 #include "vn_command_buffer.h"
 
-#include "venus-protocol/vn_protocol_driver_command_buffer.h"
-#include "venus-protocol/vn_protocol_driver_command_pool.h"
 #include "vk_synchronization.h"
+#include "vn_protocol_driver_command_buffer.h"
+#include "vn_protocol_driver_command_pool.h"
 
 #include "vn_descriptor_set.h"
 #include "vn_device.h"
@@ -1314,6 +1314,15 @@ VKAPI_ATTR void VKAPI_CALL
 vn_CmdEndRendering(VkCommandBuffer commandBuffer)
 {
    VN_CMD_ENQUEUE(vkCmdEndRendering, commandBuffer);
+
+   vn_cmd_end_rendering(vn_command_buffer_from_handle(commandBuffer));
+}
+
+VKAPI_ATTR void VKAPI_CALL
+vn_CmdEndRendering2KHR(VkCommandBuffer commandBuffer,
+                       const VkRenderingEndInfoKHR *pRenderingEndInfo)
+{
+   VN_CMD_ENQUEUE(vkCmdEndRendering2KHR, commandBuffer, pRenderingEndInfo);
 
    vn_cmd_end_rendering(vn_command_buffer_from_handle(commandBuffer));
 }

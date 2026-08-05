@@ -35,18 +35,22 @@ pan_want_debug_info(unsigned arch)
 }
 
 #ifdef WITH_PANFROST_RUST
-#define USE_KRAID_INTERNAL (1ull << 31)
+#define USE_KRAID_CS (1ull << 0)
+#define USE_KRAID_FS (1ull << 1)
+#define USE_KRAID_VS (1ull << 2)
+#define USE_KRAID_INTERNAL (1ull << 3)
+#define USE_KRAID_ALL 0xf
 
 static const struct debug_named_value pan_use_kraid_flags[] = {
-   { "cs", 1 << MESA_SHADER_COMPUTE, "Use Kraid for compute shaders" },
-   { "fs", 1 << MESA_SHADER_FRAGMENT, "Use Kraid for fragment shaders" },
-   { "vs", 1 << MESA_SHADER_VERTEX, "Use Kraid for vertex shaders" },
+   { "cs", USE_KRAID_CS, "Use Kraid for compute shaders" },
+   { "fs", USE_KRAID_FS, "Use Kraid for fragment shaders" },
+   { "vs", USE_KRAID_VS, "Use Kraid for vertex shaders" },
    { "internal", USE_KRAID_INTERNAL, "Use Kraid for internal shaders" },
-   { "all", ~0, "Use Kraid for all shader stages" },
+   { "all", USE_KRAID_ALL, "Use Kraid for all shader stages" },
    DEBUG_NAMED_VALUE_END,
 };
 
-DEBUG_GET_ONCE_FLAGS_OPTION(kraid_stages, "PAN_USE_KRAID",
+DEBUG_GET_ONCE_FLAGS_OPTION(use_kraid, "PAN_USE_KRAID",
                             pan_use_kraid_flags, 0)
 #endif
 
@@ -57,14 +61,53 @@ pan_use_kraid(unsigned arch, mesa_shader_stage stage, bool internal)
    if (arch < 9)
       return false;
 
-   uint64_t use_kraid = debug_get_option_kraid_stages();
+   uint64_t use_kraid = debug_get_option_use_kraid();
    if (internal && !(use_kraid & USE_KRAID_INTERNAL))
       return false;
 
-   return use_kraid & (1 << stage);
+   switch (stage) {
+   case MESA_SHADER_VERTEX:
+      return use_kraid & USE_KRAID_VS;
+   case MESA_SHADER_FRAGMENT:
+      return use_kraid & USE_KRAID_FS;
+   case MESA_SHADER_COMPUTE:
+   case MESA_SHADER_KERNEL:
+      return use_kraid & USE_KRAID_CS;
+   default:
+      return false;
+   }
 #else
    return false;
 #endif
+}
+
+/**
+ * Returns a set of flags which may affect the output of the compiler, used
+ * to invalidate caches.  This should be passed into disk_cache_create()
+ * and may also be used with Vulkan pipeline caches or other shader caches
+ * to ensure environment variables are taken into account, even when shaders
+ * are pulled from the cache.
+ */
+uint32_t
+pan_get_compiler_flags(unsigned arch)
+{
+   if (arch >= 6) {
+#ifdef WITH_PANFROST_RUST
+      const uint32_t use_kraid = debug_get_option_use_kraid();
+      const uint32_t kraid_flags = kraid_get_compiler_flags();
+#else
+      const uint32_t use_kraid = 0, kraid_flags = 0;
+#endif
+      const uint32_t bi_flags = bifrost_get_compiler_flags();
+
+      assert(bi_flags <= (1ull << 18));
+      assert(use_kraid <= (1ull << 4));
+      assert(kraid_flags <= (1ull << 10));
+
+      return bi_flags | (use_kraid << 18) | (kraid_flags << 22);
+   } else {
+      return midgard_get_compiler_flags();
+   }
 }
 
 const nir_shader_compiler_options *

@@ -1161,6 +1161,7 @@ radv_device_init_compiler_info(struct radv_device *device)
    bool image_2d_view_of_3d = device->vk.enabled_features.image2DViewOf3D && pdev->info.gfx_level == GFX9;
    bool mesh_shader_queries = device->vk.enabled_features.meshShaderQueries && pdev->emulate_mesh_shader_queries;
    bool primitives_generated_query = radv_uses_primitives_generated_query(device);
+   struct vk_pipeline_robustness_state robustness_state = device->vk.robustness_state;
 
    /* The Vulkan spec says:
     *  "Binary shaders retrieved from a physical device with a certain shaderBinaryUUID are
@@ -1172,8 +1173,31 @@ radv_device_init_compiler_info(struct radv_device *device)
     */
    if (device->vk.enabled_features.shaderObject) {
       image_2d_view_of_3d = pdev->info.gfx_level == GFX9;
+      mesh_shader_queries = true;
       primitives_generated_query = true;
+      robustness_state.storage_buffers = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_ROBUST_BUFFER_ACCESS_2;
+      robustness_state.uniform_buffers = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_ROBUST_BUFFER_ACCESS_2;
+      robustness_state.vertex_inputs = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_ROBUST_BUFFER_ACCESS_2;
+      robustness_state.images = VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_ROBUST_IMAGE_ACCESS_2;
+      robustness_state.null_uniform_buffer_descriptor = true;
+      robustness_state.null_storage_buffer_descriptor = true;
    }
+
+   /* We also need to be careful to not use most device->vk.enabled_features in the
+    * radv_compiler_info. This is because Fossilize only tracks the features it considers relevant
+    * for shader compilation in order to share databases across devices (which may have different
+    * sets of supported features) and use them to fill shader caches. The Fossilize replayer enables
+    * all other features.
+    *
+    * The features Fossilize tracks include robustBufferAccess, robustImageAccess, robustness2
+    * features, shaderObject, image2DViewOf3D, meshShaderQueries and PrimitivesGeneratedQuery features.
+    *
+    * The situation is similar for extension enablement.
+    *
+    * VkPhysicalDeviceLineRasterizationFeatures::smoothLines is used below, but it's part of the pipeline
+    * key instead of the cache key, so cache misses only happen with applications which don't enable the
+    * feature and have pipelines which may enable smooth lines.
+    */
 
    struct radv_compiler_info info = {
       /* Hardware info */
@@ -1203,7 +1227,6 @@ radv_device_init_compiler_info(struct radv_device *device)
             .force_64_byte_sampled_image = pdev->force_64_byte_sampled_image,
             .robust_buffer_access = pdev->use_llvm && (device->vk.enabled_features.robustBufferAccess2 ||
                                                        device->vk.enabled_features.robustBufferAccess),
-            .coop_matrix_robust_buffer_access = device->vk.enabled_features.cooperativeMatrixRobustBufferAccess,
             .mitigate_smem_oob = pdev->info.compiler_info.has_smem_oob_access_bug &&
                                  !(instance->debug_flags & RADV_DEBUG_NO_SMEM_MITIGATION),
             .mitigate_smem_with_null_prt =
@@ -1280,8 +1303,8 @@ radv_device_init_compiler_info(struct radv_device *device)
       .buffer_descriptor_size = pdev->vk.properties.bufferDescriptorSize,
       .buffer_descriptor_alignment = pdev->vk.properties.bufferDescriptorAlignment,
       /* Shader features, included as part of the pipeline key */
-      .device_robustness_state = &device->vk.robustness_state,
-      .smooth_lines = device->vk.enabled_features.smoothLines,
+      .device_robustness_state = robustness_state,
+      .smooth_lines = device->vk.enabled_features.smoothLines, /* This is only used for pipeline objects. */
       .force_vrs_enabled = device->force_vrs_enabled,
       /* Wave/subgroup sizes */
       .subgroup_size = device->vk.physical->properties.subgroupSize,

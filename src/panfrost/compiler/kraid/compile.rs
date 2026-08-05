@@ -4,6 +4,7 @@
 use crate::debug::*;
 use crate::ir::*;
 use crate::model::model_for_gpu_id;
+use crate::ops::OpNop;
 use compiler::bindings::*;
 use kraid_bindings::*;
 
@@ -105,25 +106,15 @@ pub extern "C" fn kraid_get_nir_shader_compiler_options(
     arch: u8,
     merge_wg: bool,
 ) -> *const nir_shader_compiler_options {
-    static OPTS: OnceLock<
-        HashMap<
-            (u8, bool),
-            // Somebody did something silly and put a callback in
-            // nir_shader_compiler_options and now it's not Send so
-            // we can't put it in a OnceLock.  Work around that by
-            // stashing a u8 array instead
-            [u8; std::mem::size_of::<nir_shader_compiler_options>()],
-        >,
-    > = OnceLock::new();
+    static OPTS: OnceLock<HashMap<(u8, bool), nir_shader_compiler_options>> =
+        OnceLock::new();
 
     let opts = OPTS
         .get_or_init(|| {
             let mut map = HashMap::new();
             for arch in 9..=15 {
                 for merge_wg in [false, true] {
-                    let opts = unsafe {
-                        std::mem::transmute(nir_opts(arch, merge_wg))
-                    };
+                    let opts = nir_opts(arch, merge_wg);
                     map.insert((arch, merge_wg), opts);
                 }
             }
@@ -132,7 +123,7 @@ pub extern "C" fn kraid_get_nir_shader_compiler_options(
         .get(&(arch, merge_wg))
         .expect("Unsupported GPU arch");
 
-    unsafe { std::mem::transmute(opts) }
+    opts as *const _
 }
 
 fn dynarray_append_vec<T: Copy>(buf: &mut util_dynarray, vec: Vec<T>) {
@@ -147,11 +138,58 @@ fn dynarray_append_vec<T: Copy>(buf: &mut util_dynarray, vec: Vec<T>) {
     }
 }
 
-fn write_back_info(src: &ShaderInfo, dst: &mut pan_shader_info) {
+fn write_back_info(
+    src: &ShaderInfo,
+    nir: &nir_shader,
+    dst: &mut pan_shader_info,
+) {
     dst.work_reg_count = src.registers_used.into();
     dst.tls_size = src.tls_size;
     dst.preload = src.register_preload;
     dst.has_shader_clk_instr = src.has_ld_gclk;
+
+    if nir.info.stage() == MESA_SHADER_VERTEX {
+        // TODO: only for BI_IDVS_ALL (only one supported right now)
+        let secondary_mask =
+            unsafe { val_ex_fifo_varying_bits() } | (1 << VARYING_SLOT_POS);
+        dst.__bindgen_anon_1.vs.secondary_enable =
+            (nir.info.outputs_written & !secondary_mask) != 0;
+    }
+}
+
+/// v9 reuses psiz writes as line width when drawing lines.
+/// We cannot know what we're drawing at compile time so we need to create
+/// a variant without psiz writes to be selected when we aren't drawing points
+fn encode_no_psiz_variant(
+    nir: &nir_shader,
+    s: &mut Shader,
+    model: &dyn Model,
+    binary: &mut util_dynarray,
+    info: &mut pan_shader_info,
+) {
+    // TODO: v10+ HW should ignore psiz writes, investigate
+    if nir.info.internal
+        || nir.info.stage() != MESA_SHADER_VERTEX
+        || (nir.info.outputs_written & (1 << VARYING_SLOT_PSIZ)) == 0
+    {
+        return;
+    }
+
+    info.__bindgen_anon_1.vs.no_psiz_offset = binary.size;
+    // Find the store with is_psiz set
+    let store = s
+        .blocks
+        .iter_mut()
+        .rev()
+        .flat_map(|b| b.instrs.iter_mut().rev())
+        .find(|i| matches!(&i.op, Op::Store(s) if s.is_psiz))
+        .expect("No psiz write found");
+
+    // Patch it out, but preserve flow
+    store.op = Op::Nop(OpNop {});
+
+    let bin = model.encode_shader(s);
+    dynarray_append_vec(binary, bin);
 }
 
 #[unsafe(no_mangle)]
@@ -161,7 +199,7 @@ pub extern "C" fn kraid_compile_nir(
     binary: &mut util_dynarray,
     info: &mut pan_shader_info,
 ) {
-    let model = model_for_gpu_id(inputs.gpu_id).unwrap();
+    let model = model_for_gpu_id(inputs.gpu_id, inputs.gpu_variant).unwrap();
 
     if DEBUG.contains(DebugFlags::PRINT) {
         eprint!("{}", nir.to_string().unwrap());
@@ -183,9 +221,13 @@ pub extern "C" fn kraid_compile_nir(
     pass!(s.lower_copy());
     pass!(s.assign_message_slots());
 
+    info.stats = s.get_stats();
+
     let bin = model.encode_shader(&s);
     dynarray_append_vec(binary, bin);
 
-    write_back_info(&s.info, info);
+    encode_no_psiz_variant(nir, &mut s, model.as_ref(), binary, info);
+
+    write_back_info(&s.info, nir, info);
     unsafe { pan_shader_update_info(info, nir, inputs) };
 }

@@ -478,12 +478,6 @@ visit_intrinsic(nir_intrinsic_instr *instr, struct divergence_state *state)
       if (options & nir_divergence_across_subgroups)
          is_divergent = true;
       break;
-   case nir_intrinsic_load_attribute_pan:
-      assert(stage == MESA_SHADER_VERTEX);
-      is_divergent = src_divergent(instr->src[0], state) ||
-                     src_divergent(instr->src[1], state) ||
-                     src_divergent(instr->src[2], state);
-      break;
    case nir_intrinsic_load_per_vertex_input:
       is_divergent = src_divergent(instr->src[0], state) ||
                      src_divergent(instr->src[1], state);
@@ -599,6 +593,7 @@ visit_intrinsic(nir_intrinsic_instr *instr, struct divergence_state *state)
          UNREACHABLE("Invalid stage for load_primitive_tess_level_*");
       break;
 
+   case nir_intrinsic_load_shared_base_ptr:
    case nir_intrinsic_load_workgroup_index:
    case nir_intrinsic_load_workgroup_id:
       assert(mesa_shader_stage_uses_workgroup(stage) || stage == MESA_SHADER_TESS_CTRL);
@@ -814,6 +809,7 @@ visit_intrinsic(nir_intrinsic_instr *instr, struct divergence_state *state)
    case nir_intrinsic_load_input_attachment_target_pan:
    case nir_intrinsic_load_input_attachment_conv_pan:
    case nir_intrinsic_load_global_cvt_pan:
+   case nir_intrinsic_load_attr_pan:
    case nir_intrinsic_lea_attr_pan:
    case nir_intrinsic_lea_buf_pan:
    case nir_intrinsic_cubeface_pan:

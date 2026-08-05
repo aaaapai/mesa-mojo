@@ -35,7 +35,10 @@ use std::num::FpCategory;
 macro_rules! bool_as_mod_str {
     ($s: ident . $mod: ident) => {
         if $s.$mod { stringify!(.$mod) } else { "" }
-    }
+    };
+    ($gate: expr, $display: expr) => {
+        if $gate { $display } else { "" }
+    };
 }
 
 // Code compilation bug: old rustc versions use
@@ -1961,7 +1964,10 @@ impl PerCompFoldable for OpIAdd {
 
 #[repr(C)]
 #[derive(Clone, Opcode)]
-#[variants(src_type in [S16, U16, V2S16, V2U16, S32, U32])]
+#[variants(src_type in [
+    S8, U8, V2S8, V2U8, V4S8, V4U8,
+    S16, U16, V2S16, V2U16, S32, U32
+])]
 pub struct OpICmp {
     pub dst: Dst,
 
@@ -2135,9 +2141,10 @@ impl Foldable for OpIDpAdd {
 #[repr(C)]
 #[derive(Clone, Opcode)]
 #[variants(dst_type in [
-    S8, U8, V2S8, V2U8, V4S8, V4U8,
-    S16, U16, V2S16, V2U16,
-    S32, U32, S64, U64,
+    I8, S8, U8, V2I8, V2S8, V2U8, V4I8, V4S8, V4U8,
+    I16, S16, U16, V2I16, V2S16, V2U16,
+    // I64 doesn't exist because 64-bit multiply requires widening
+    I32, S32, U32, S64, U64,
 ])]
 pub struct OpIMul {
     pub dst: Dst,
@@ -2288,6 +2295,45 @@ impl fmt::Display for MemAccess {
             MemAccess::EStream => write!(f, ".estream"),
             MemAccess::Force => write!(f, ".force"),
         }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Opcode)]
+#[variants(dst_type in [
+    F16, V2F16, V3F16, V4F16,
+    S16, V2S16, V3S16, V4S16,
+    U16, V2U16, V3U16, V4U16,
+    F32, V2F32, V3F32, V4F32,
+    A32, V2A32, V3A32, V4A32,
+    S32, V2S32, V3S32, V4S32,
+    U32, V2U32, V3U32, V4U32,
+])]
+pub struct OpLdAttr {
+    pub dst: Dst,
+    pub dst_type: DataType,
+
+    #[src_type(I32)]
+    pub vertex_index: Src,
+    #[src_type(I32)]
+    pub instance_index: Src,
+    #[src_type(I32)]
+    pub handle: Src,
+}
+
+impl DisplayOp for OpLdAttr {
+    fn fmt_name(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "LD_ATTR.{}", self.dst_type)
+    }
+
+    fn fmt_body(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} {} {}",
+            self.fmt_src(&self.vertex_index),
+            self.fmt_src(&self.instance_index),
+            self.fmt_handle_src(&self.handle),
+        )
     }
 }
 
@@ -2456,7 +2502,7 @@ impl DisplayOp for OpLdTex {
             " {} {} {}",
             self.fmt_src(&self.coords[0]),
             self.fmt_src(&self.coords[1]),
-            self.fmt_src(&self.handle),
+            self.fmt_handle_src(&self.handle),
         )
     }
 }
@@ -2508,7 +2554,7 @@ impl DisplayOp for OpLeaPka {
             f,
             " {} {}",
             self.fmt_src(&self.offset),
-            self.fmt_src(&self.handle),
+            self.fmt_handle_src(&self.handle),
         )
     }
 }
@@ -2535,7 +2581,7 @@ impl DisplayOp for OpLeaTex {
             " {} {} {}",
             self.fmt_src(&self.coords[0]),
             self.fmt_src(&self.coords[1]),
-            self.fmt_src(&self.handle),
+            self.fmt_handle_src(&self.handle),
         )
     }
 }
@@ -2546,6 +2592,9 @@ impl DisplayOp for OpLeaTex {
 pub struct OpLoad {
     pub dst: Dst,
     pub dst_type: DataType,
+
+    /// Used to determine if this LOAD should count towards the fill count
+    pub is_tls: bool,
     pub access: MemAccess,
 
     #[src_type(I64)]
@@ -2561,7 +2610,8 @@ impl DisplayOp for OpLoad {
     fn fmt_body(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{} {} #{}",
+            "{}{} {} #{}",
+            bool_as_mod_str!(self.is_tls, "tls"),
             self.access,
             self.fmt_src(&self.addr),
             self.offset,
@@ -3157,6 +3207,11 @@ impl DisplayOp for OpStCvt {
 #[variants(src_type in [I8, I16, I24, I32, I48, I64, I96, I128])]
 pub struct OpStore {
     pub src_type: DataType,
+
+    /// Used to determine if this STORE should count towards the spill count
+    pub is_tls: bool,
+    /// Is this a glPointSize write?
+    pub is_psiz: bool,
     pub access: MemAccess,
 
     pub data: Src,
@@ -3174,7 +3229,9 @@ impl DisplayOp for OpStore {
     fn fmt_body(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{} {} {} #{}",
+            "{}{}{} {} {} #{}",
+            bool_as_mod_str!(self.is_tls, "tls"),
+            bool_as_mod_str!(self.is_psiz, "psiz"),
             self.access,
             self.fmt_src(&self.data),
             self.fmt_src(&self.addr),
@@ -3634,6 +3691,7 @@ pub enum Op {
     IMul(Box<OpIMul>),
     ISub(Box<OpISub>),
     IToF32(Box<OpIToF32>),
+    LdAttr(Box<OpLdAttr>),
     LdCvt(Box<OpLdCvt>),
     LdExp(Box<OpLdExp>),
     LdGClk(Box<OpLdGClk>),

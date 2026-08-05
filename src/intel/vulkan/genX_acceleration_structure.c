@@ -640,6 +640,9 @@ anv_update_as(VkCommandBuffer commandBuffer, struct vk_device *vk_device,
       VK_FROM_HANDLE(vk_acceleration_structure, src, state->build_info->srcAccelerationStructure);
       VK_FROM_HANDLE(vk_acceleration_structure, dst, state->build_info->dstAccelerationStructure);
 
+      struct bvh_layout bvh_layout;
+      get_bvh_layout(state, &bvh_layout);
+
       /* Just copy over data from src to dst if mismatch. */
       if (src != dst) {
          assert(src->offset == 0 && dst->offset == 0);
@@ -648,8 +651,9 @@ anv_update_as(VkCommandBuffer commandBuffer, struct vk_device *vk_device,
          struct anv_address dst_addr =
             anv_address_from_u64(vk_acceleration_structure_get_va(dst));
 
-         assert(src->size == dst->size);
-         anv_cmd_copy_addr(cmd_buffer, src_addr, dst_addr, src->size);
+         assert(bvh_layout.size <= src->size);
+         assert(bvh_layout.size <= dst->size);
+         anv_cmd_copy_addr(cmd_buffer, src_addr, dst_addr, bvh_layout.size);
          barrier_needed = true;
       }
    }
@@ -741,7 +745,8 @@ anv_encode(VkCommandBuffer commandBuffer, struct vk_device *device, struct vk_me
           !flushed_cp_after_init_update_scratch)
          vk_barrier_compute_w_to_compute_r(commandBuffer);
 
-      vk_build_stage(anv_update_as, commandBuffer, device, meta, args, states, build_count, 0, true);
+      vk_build_stage(anv_update_as, commandBuffer, device, meta, args, states, build_count,
+                     VK_BUILD_FLAG_HAS_QUADS, true);
    }
 
    if (!has_build)

@@ -6187,6 +6187,7 @@ tu_render_pass_state_merge(struct tu_render_pass_state *dst,
    dst->has_zpass_done_sample_count_write_in_rp |= src->has_zpass_done_sample_count_write_in_rp;
    dst->disable_gmem |= src->disable_gmem;
    dst->sysmem_single_prim_mode |= src->sysmem_single_prim_mode;
+   dst->lrz_disable_for_next_rp |= src->lrz_disable_for_next_rp;
    dst->draw_cs_writes_to_cond_pred |= src->draw_cs_writes_to_cond_pred;
    dst->shared_viewport |= src->shared_viewport;
 
@@ -6365,8 +6366,7 @@ tu_CmdExecuteCommands(VkCommandBuffer commandBuffer,
           VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT) {
          assert(tu_cs_is_empty(&secondary->cs));
 
-         tu_lrz_flush_valid_at_secondary_rp_boundary(
-            cmd, secondary->state.lrz, &cmd->draw_cs);
+         TU_CALLX(cmd->device, tu_lrz_flush_valid_at_secondary_rp_boundary)(cmd, secondary->state.lrz, &cmd->draw_cs);
 
          result = tu_cs_add_entries(&cmd->draw_cs, &secondary->draw_cs);
          if (result != VK_SUCCESS) {
@@ -7400,6 +7400,7 @@ tu_CmdSetRenderingInputAttachmentIndicesKHR(
 }
 TU_GENX(tu_CmdSetRenderingInputAttachmentIndicesKHR);
 
+template <chip CHIP>
 static void
 tu_next_subpass_lrz(struct tu_cmd_buffer *cmd,
                     const struct tu_subpass *subpass,
@@ -7407,10 +7408,11 @@ tu_next_subpass_lrz(struct tu_cmd_buffer *cmd,
 {
    /* If custom resolve writes depth LRZ shouldn't be used for it. */
    if (new_subpass->custom_resolve) {
-      if (new_subpass->depth_stencil_attachment.attachment != VK_ATTACHMENT_UNUSED)
-         cmd->state.lrz.valid = false;
-
-      cmd->state.dirty |= TU_CMD_DIRTY_LRZ;
+      if (new_subpass->depth_stencil_attachment.attachment != VK_ATTACHMENT_UNUSED) {
+         tu_lrz_disable_during_renderpass<CHIP>(cmd, "Custom resolve writes depth");
+      } else {
+         cmd->state.dirty |= TU_CMD_DIRTY_LRZ;
+      }
       return;
    }
 
@@ -7420,8 +7422,7 @@ tu_next_subpass_lrz(struct tu_cmd_buffer *cmd,
     * so if they become active again, we reuse its old state.
     */
    if (new_subpass->depth_stencil_attachment.attachment != subpass->depth_stencil_attachment.attachment) {
-      cmd->state.lrz.valid = false;
-      cmd->state.dirty |= TU_CMD_DIRTY_LRZ;
+      tu_lrz_disable_during_renderpass<CHIP>(cmd, "Depth/stencil attachment changed between subpasses");
    }
 }
 
@@ -7444,7 +7445,7 @@ tu_CmdNextSubpass2(VkCommandBuffer commandBuffer,
    const struct tu_subpass *subpass = cmd->state.subpass++;
    const struct tu_subpass *new_subpass = cmd->state.subpass;
 
-   tu_next_subpass_lrz(cmd, subpass, new_subpass);
+   tu_next_subpass_lrz<CHIP>(cmd, subpass, new_subpass);
 
    if (cmd->state.tiling->possible) {
       if (cmd->state.pass->has_fdm)
@@ -7499,7 +7500,7 @@ tu_CmdBeginCustomResolveEXT(VkCommandBuffer commandBuffer,
    const struct tu_subpass *new_subpass = &cmd->dynamic_subpasses[1];
    cmd->state.subpass = new_subpass;
 
-   tu_next_subpass_lrz(cmd, subpass, new_subpass);
+   tu_next_subpass_lrz<CHIP>(cmd, subpass, new_subpass);
 
    tu_fill_render_pass_state(&cmd->state.vk_rp,
                              &cmd->state.vk_mv,
@@ -9843,11 +9844,10 @@ tu_CmdEndRendering2EXT(VkCommandBuffer commandBuffer,
 
    if (cmd_buffer->state.suspending) {
       cmd_buffer->state.suspended_pass.lrz = cmd_buffer->state.lrz;
-      /* We cannot pass LRZ state to next resuming renderpass, so we have to
-       * force disable it here.
+      /* Flush LRZ validity and sticky write-disable state across the
+       * resuming renderpass, which cannot inherit our CPU-tracked LRZ state.
        */
-      tu_lrz_flush_valid_at_suspending_rp_boundary(cmd_buffer,
-                                                   &cmd_buffer->draw_cs);
+      TU_CALLX(cmd_buffer->device, tu_lrz_flush_valid_at_suspending_rp_boundary)(cmd_buffer, &cmd_buffer->draw_cs);
    } else {
       TU_CALLX(cmd_buffer->device, tu_emit_custom_resolve_end)(cmd_buffer);
    }

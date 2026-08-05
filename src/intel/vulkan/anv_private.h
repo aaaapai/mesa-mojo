@@ -2708,6 +2708,8 @@ struct anv_device {
 
     uint32_t                                    queue_count;
     struct anv_queue  *                         queues;
+    /* Bitfield of queues active that can use buffer/image views */
+    VkQueueFlagBits                             view_queues;
 
     struct anv_scratch_pool                     scratch_pool;
     struct anv_scratch_pool                     protected_scratch_pool;
@@ -4655,8 +4657,7 @@ struct anv_cmd_graphics_state {
    struct intel_urb_config urb_cfg;
 
    uint32_t indirect_data_stride;
-   enum u_tristate indirect_data_stride_aligned : 2;
-
+   bool indirect_data_stride_set : 1;
 
    bool kill_pixel : 1;
    bool uses_xfb : 1;

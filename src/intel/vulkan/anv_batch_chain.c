@@ -70,6 +70,7 @@ anv_reloc_list_init_clone(struct anv_reloc_list *list,
                           const struct anv_reloc_list *other_list)
 {
    list->dep_words = other_list->dep_words;
+   list->uses_relocs = other_list->uses_relocs;
 
    if (list->dep_words > 0) {
       list->deps =
@@ -144,6 +145,9 @@ VkResult
 anv_reloc_list_append(struct anv_reloc_list *list,
                       struct anv_reloc_list *other)
 {
+   if (!list->uses_relocs)
+      return VK_SUCCESS;
+
    anv_reloc_list_grow_deps(list, other->dep_words);
    for (uint32_t w = 0; w < other->dep_words; w++)
       list->deps[w] |= other->deps[w];

@@ -46,8 +46,8 @@ bi_lower_bit_size(const nir_instr *instr, void *data)
       case nir_op_fexp2:
       case nir_op_flog2:
       case nir_op_fpow:
-         // Kraid can handle 32-bit fexp/flog/fpow
-         if (opts->use_kraid)
+         // Kraid can handle 16-bit fexp/flog/fpow on v12+
+         if (opts->use_kraid && pan_arch(opts->gpu_id) >= 12)
             return 0;
          FALLTHROUGH;
       case nir_op_fsin:
@@ -134,15 +134,27 @@ bi_vectorize_filter(const nir_instr *instr, const void *data)
    case nir_op_ball_fequal2:
    case nir_op_ball_fequal3:
    case nir_op_ball_fequal4:
+   case nir_op_ball_fequal5:
+   case nir_op_ball_fequal8:
+   case nir_op_ball_fequal16:
    case nir_op_bany_fnequal2:
    case nir_op_bany_fnequal3:
    case nir_op_bany_fnequal4:
+   case nir_op_bany_fnequal5:
+   case nir_op_bany_fnequal8:
+   case nir_op_bany_fnequal16:
    case nir_op_ball_iequal2:
    case nir_op_ball_iequal3:
    case nir_op_ball_iequal4:
+   case nir_op_ball_iequal5:
+   case nir_op_ball_iequal8:
+   case nir_op_ball_iequal16:
    case nir_op_bany_inequal2:
    case nir_op_bany_inequal3:
    case nir_op_bany_inequal4:
+   case nir_op_bany_inequal5:
+   case nir_op_bany_inequal8:
+   case nir_op_bany_inequal16:
       return 1;
    case nir_op_pack_uvec2_to_uint:
    case nir_op_pack_uvec4_to_uint:
@@ -961,6 +973,7 @@ bifrost_postprocess_nir(nir_shader *nir,
       /* Needs to run after lower_vs_atomics as it inserts operations between
        * ssbo_atomic and store_output */
       NIR_PASS(_, nir, pan_nir_lower_noperspective_vs);
+      NIR_PASS(_, nir, pan_nir_lower_vs_inputs, inputs->gpu_id);
       NIR_PASS(_, nir, pan_nir_lower_vs_outputs, inputs->gpu_id,
                inputs->varying_layout, info->vs.idvs,
                &info->vs.needs_extended_fifo);
@@ -1332,6 +1345,12 @@ bifrost_compile_shader_nir(nir_shader *nir,
    info->fau.count = inputs->fau.reserved;
 
    if (bi_use_kraid(nir, gpu_id)) {
+      if (inputs->fau.pushable_ubos) {
+         /* We can't push if there's a driver-reserved range */
+         assert(inputs->fau.reserved == 0);
+         NIR_PASS(_, nir, pan_nir_opt_push_ubo, inputs->fau.pushable_ubos,
+                  &info->fau, &info->ubo_mask);
+      }
 #ifdef WITH_PANFROST_RUST
       kraid_compile_nir(nir, inputs, binary, info);
 #endif
