@@ -122,6 +122,7 @@ if with_dri
   if with_platform_android
     deps_for_egl += [dep_android, idep_u_gralloc]
     files_egl += files('drivers/dri2/platform_android.c')
+    files_egl += files('drivers/dri2/platform_android_airgap.c')
   endif
 elif with_platform_haiku
   c_args_for_egl += [
