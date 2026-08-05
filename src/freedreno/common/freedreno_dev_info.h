@@ -497,6 +497,10 @@ struct fd_dev_info {
 
       /* GMEM size in bytes */
       uint32_t gmem_size;
+
+      bool alias_mova_quirk;
+      bool alias_predication_quirk;
+
    } props;
 };
 
