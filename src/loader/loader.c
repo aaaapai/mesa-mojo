@@ -74,7 +74,7 @@
 #endif
 
 #ifdef HAVE_FREEDRENO_KGSL
-#include "../freedreno/kgsl/kgsl_priv.h"
+#include "../freedreno/drm/kgsl/kgsl_priv.h"
 #endif
 
 static void default_logger(int level, const char *fmt, ...)
