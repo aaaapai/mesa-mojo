@@ -73,6 +73,10 @@
 #define PATH_MAX 4096
 #endif
 
+#ifdef HAVE_FREEDRENO_KGSL
+#include "../freedreno/kgsl/kgsl_priv.h"
+#endif
+
 static void default_logger(int level, const char *fmt, ...)
 {
    if (level <= _LOADER_WARNING) {
