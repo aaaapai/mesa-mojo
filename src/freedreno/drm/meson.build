@@ -64,6 +64,13 @@ if freedreno_kmds.contains('virtio')
   libfreedreno_drm_link_with += libvdrm
 endif
 
+libfreedreno_kgsl_files = files(
+  'kgsl/kgsl_device.c',
+  'kgsl/kgsl_bo.c',
+  'kgsl/kgsl_pipe.c',
+  'kgsl/kgsl_ringbuffer_sp.c',
+)
+
 libfreedreno_drm = static_library(
   'freedreno_drm',
   [
