@@ -71,6 +71,10 @@ libfreedreno_kgsl_files = files(
   'kgsl/kgsl_ringbuffer_sp.c',
 )
 
+if freedreno_kmds.contains('kgsl')
+  libfreedreno_drm_files += libfreedreno_kgsl_files
+endif
+
 libfreedreno_drm = static_library(
   'freedreno_drm',
   [
