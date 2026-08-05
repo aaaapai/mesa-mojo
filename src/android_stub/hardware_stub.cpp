@@ -8,25 +8,25 @@
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// ================== 声明 libpojavexec.so 中的函数 ==================
-// 这些函数在 libpojavexec.so 中已实现，我们只需声明并动态获取
+// ================== 声明 libdriver_helper.so 中的函数 ==================
 typedef bool (*ns_load_t)(const char* lib_search_path);
 typedef void* (*ns_dlopen_t)(const char* name, int flag);
 
 static ns_load_t linker_ns_load = nullptr;
 static ns_dlopen_t linker_ns_dlopen = nullptr;
 
-// 尝试加载 libpojavexec.so 并获取函数指针
+// 尝试加载 libdriver_helper.so 并获取函数指针
 static bool initNamespaceBypass() {
-    void* handle = dlopen("libpojavexec.so", RTLD_LAZY);
+    // 修改：从 libdriver_helper.so 加载
+    void* handle = dlopen("libdriver_helper.so", RTLD_LAZY);
     if (!handle) {
-        LOGE("Failed to dlopen libpojavexec.so: %s", dlerror());
+        LOGE("Failed to dlopen libdriver_helper.so: %s", dlerror());
         return false;
     }
     linker_ns_load = (ns_load_t)dlsym(handle, "linker_ns_load");
     linker_ns_dlopen = (ns_dlopen_t)dlsym(handle, "linker_ns_dlopen");
     if (!linker_ns_load || !linker_ns_dlopen) {
-        LOGE("Failed to get symbols from libpojavexec.so");
+        LOGE("Failed to get symbols from libdriver_helper.so");
         dlclose(handle);
         return false;
     }
@@ -122,3 +122,4 @@ int hw_get_module(const char *id, const struct hw_module_t **module) {
 }
 
 } // extern "C"
+
