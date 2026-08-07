@@ -96,9 +96,9 @@ static EGLBoolean
 droid_open_device_kgsl(_EGLDisplay *disp, bool swrast)
 {
    struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
-   static const char path[] = "/dev/kgsl-3d0";
 
-   int fd = open(path, O_RDWR | O_CLOEXEC);
+   int fd = open("/dev/kgsl-3d0", O_RDWR | O_CLOEXEC | O_NONBLOCK);
+   printf("Opening /dev/kgsl-3d0, O_RDWR | O_CLOEXEC | O_NONBLOCK...\n");
    if (fd < 0) {
       fd = loader_open_device(path);
    }
