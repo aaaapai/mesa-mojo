@@ -771,8 +771,13 @@ etna_vertex_elements_state_create(struct pipe_context *pctx,
             COND(nonconsecutive, VIVS_NFE_GENERIC_ATTRIB_CONFIG1_NONCONSECUTIVE) |
             VIVS_NFE_GENERIC_ATTRIB_CONFIG1_END(end_offset - start_offset);
       }
-      cs->FE_VERTEX_STREAM_CONTROL[buffer_idx] =
-            FE_VERTEX_STREAM_CONTROL_VERTEX_STRIDE(elements[idx].src_stride);
+
+      if (screen->info->halti >= 2)
+         cs->FE_VERTEX_STREAM_CONTROL[buffer_idx] =
+               VIVS_NFE_VERTEX_STREAMS_CONTROL_VERTEX_STRIDE(elements[idx].src_stride);
+      else
+         cs->FE_VERTEX_STREAM_CONTROL[buffer_idx] =
+               FE_VERTEX_STREAM_CONTROL_VERTEX_STRIDE(elements[idx].src_stride);
 
       if (util_format_is_pure_integer(elements[idx].src_format))
          cs->NFE_GENERIC_ATTRIB_SCALE[idx] = 1;
@@ -1100,24 +1105,6 @@ etna_update_zsa(struct etna_context *ctx)
    return true;
 }
 
-static bool
-etna_record_flush_resources(struct etna_context *ctx)
-{
-   struct pipe_framebuffer_state *fb = &ctx->framebuffer_s.base;
-
-   for (unsigned i = 0; i < fb->nr_cbufs; i++) {
-      if (!fb->cbufs[i].texture)
-         continue;
-
-      struct etna_resource *rsc = etna_resource(fb->cbufs[i].texture);
-
-      if (rsc->shared && !rsc->explicit_flush)
-         etna_context_add_flush_resource(ctx, &rsc->base);
-   }
-
-   return true;
-}
-
 static int
 compare_xfb_outputs(const void *a, const void *b) {
    const nir_xfb_output_info *out_a = a;
@@ -1236,8 +1223,6 @@ static const struct etna_state_updater etna_state_updates[] = {
                        ETNA_DIRTY_FRAMEBUFFER,
    },
    {
-      etna_record_flush_resources, ETNA_DIRTY_FRAMEBUFFER,
-   }, {
       etna_update_hwxfb, ETNA_DIRTY_STREAMOUT,
    }
 };

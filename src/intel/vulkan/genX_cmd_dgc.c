@@ -555,8 +555,8 @@ preprocess_rt_sequences(struct anv_cmd_buffer *cmd_buffer,
 #endif
 #if GFX_VER >= 30
             .RegistersPerThread =
-               brw_register_blocks(device->info,
-                                   cs_prog_data->base.grf_used),
+               intel_register_blocks(device->info,
+                                     cs_prog_data->base.grf_used),
 #endif
          },
       },
@@ -1021,7 +1021,7 @@ void genX(CmdExecuteGeneratedCommandsEXT)(
 
       genX(flush_pipeline_select_gpgpu)(cmd_buffer, false);
 
-      genX(flush_descriptor_buffers)(cmd_buffer, bind_state, ANV_RT_STAGE_BITS);
+      genX(flush_binding_mode)(cmd_buffer, bind_state, ANV_RT_STAGE_BITS);
 
       genX(cmd_buffer_apply_pipe_flushes)(cmd_buffer);
 

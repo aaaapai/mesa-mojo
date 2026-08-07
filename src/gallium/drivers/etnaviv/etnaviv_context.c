@@ -132,7 +132,7 @@ etna_context_destroy(struct pipe_context *pctx)
 
    slab_destroy_child(&ctx->transfer_pool);
 
-   if (ctx->in_fence_fd != -1)
+   if (ctx->in_fence_fd >= 0)
       close(ctx->in_fence_fd);
 
    FREE(pctx);
@@ -169,30 +169,30 @@ etna_get_fs(struct etna_context *ctx, struct etna_shader_key* const key)
     * halti < 2 has no HW shadow compare. halti >= 2 has it, but depth32f is
     * emulated as D24S8 and the float compare ref must not be clamped to the
     * D24 range, so it must compare in the shader (and not clamp the ref). */
-   if (ctx->dirty & (ETNA_DIRTY_SAMPLERS | ETNA_DIRTY_SAMPLER_VIEWS)) {
+   for (unsigned int i = 0; i < ctx->num_fragment_sampler_views; i++) {
+      if (!ctx->sampler[i] || !ctx->sampler_view[i])
+         continue;
 
-      for (unsigned int i = 0; i < ctx->num_fragment_sampler_views; i++) {
-         if (ctx->sampler[i]->compare_mode == PIPE_TEX_COMPARE_NONE)
-            continue;
+      if (ctx->sampler[i]->compare_mode == PIPE_TEX_COMPARE_NONE)
+         continue;
 
-         const bool emulated_z32f = format_is_emulated_z32f(ctx->sampler_view[i]->format);
+      const bool emulated_z32f = format_is_emulated_z32f(ctx->sampler_view[i]->format);
 
-         if (ctx->screen->info->halti >= 2 && !emulated_z32f)
-            continue;
+      if (ctx->screen->info->halti >= 2 && !emulated_z32f)
+         continue;
 
-         if (emulated_z32f)
-            key->shadow_compare_no_clamp = 1;
+      if (emulated_z32f)
+         key->shadow_compare_no_clamp = 1;
 
-         key->has_sample_tex_compare = 1;
-         key->num_texture_states = ctx->num_fragment_sampler_views;
+      key->has_sample_tex_compare = 1;
+      key->num_texture_states = ctx->num_fragment_sampler_views;
 
-         key->tex_swizzle[i].swizzle_r = ctx->sampler_view[i]->swizzle_r;
-         key->tex_swizzle[i].swizzle_g = ctx->sampler_view[i]->swizzle_g;
-         key->tex_swizzle[i].swizzle_b = ctx->sampler_view[i]->swizzle_b;
-         key->tex_swizzle[i].swizzle_a = ctx->sampler_view[i]->swizzle_a;
+      key->tex_swizzle[i].swizzle_r = ctx->sampler_view[i]->swizzle_r;
+      key->tex_swizzle[i].swizzle_g = ctx->sampler_view[i]->swizzle_g;
+      key->tex_swizzle[i].swizzle_b = ctx->sampler_view[i]->swizzle_b;
+      key->tex_swizzle[i].swizzle_a = ctx->sampler_view[i]->swizzle_a;
 
-         key->tex_compare_func[i] = ctx->sampler[i]->compare_func;
-      }
+      key->tex_compare_func[i] = ctx->sampler[i]->compare_func;
    }
 
    key->tex_is_128bit = ctx->tex_is_128bit[MESA_SHADER_FRAGMENT];
@@ -211,14 +211,6 @@ etna_get_fs(struct etna_context *ctx, struct etna_shader_key* const key)
 
    return true;
 }
-
-static inline void clear_draw_flag(struct etna_context **ctx_ptr) {
-   (*ctx_ptr)->in_draw_vbo = false;
-}
-
-#define AUTO_CLEAR_DRAW_FLAG(ctx) \
-   struct etna_context *_draw_cleanup __attribute__((cleanup(clear_draw_flag))) = (ctx); \
-   (ctx)->in_draw_vbo = true
 
 static void
 etna_reset_gpu_state(struct etna_context *ctx)
@@ -336,8 +328,6 @@ etna_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info,
    if (!indirect && (!draws[0].count || !info->instance_count))
       return;
 
-   AUTO_CLEAR_DRAW_FLAG(etna_context(pctx));
-
    struct etna_context *ctx = etna_context(pctx);
    struct etna_screen *screen = ctx->screen;
    struct pipe_framebuffer_state *pfb = &ctx->framebuffer_s.base;
@@ -426,6 +416,7 @@ etna_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info,
     * aside from the draw state updates that have been reserved.
     */
    etna_reserve_emit_space(ctx);
+   ETNA_CONTEXT_ATOMIC_EMIT(ctx);
 
    if (ctx->needs_gpu_state_reset)
       etna_reset_gpu_state(ctx);
@@ -490,13 +481,16 @@ etna_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info,
 
    if (ctx->dirty & ETNA_DIRTY_FRAMEBUFFER) {
       for (i = 0; i < pfb->nr_cbufs; i++) {
-         struct pipe_resource *surf;
+         struct pipe_resource *rsc;
 
          if (!pfb->cbufs[i].texture)
             continue;
 
-         surf = pfb->cbufs[i].texture;
-         resource_written(ctx, surf);
+         rsc = pfb->cbufs[i].texture;
+         resource_written(ctx, rsc);
+
+         if (etna_resource(rsc)->shared && !etna_resource(rsc)->explicit_flush)
+            etna_context_add_flush_resource(ctx, rsc);
       }
    }
 
@@ -665,13 +659,18 @@ etna_flush(struct pipe_context *pctx, struct pipe_fence_handle **fence,
                           (flags & PIPE_FLUSH_FENCE_FD) ? &out_fence_fd : NULL,
                           ctx->is_noop);
 
-   list_for_each_entry(struct etna_acc_query, aq, &ctx->active_acc_queries, node)
-      etna_acc_query_resume(aq, ctx);
+   if (ctx->in_fence_fd >= 0) {
+      close(ctx->in_fence_fd);
+      ctx->in_fence_fd = -1;
+   }
 
    if (fence)
       *fence = etna_fence_create(pctx, out_fence_fd);
 
    _mesa_hash_table_clear(ctx->pending_resources, NULL);
+
+   list_for_each_entry(struct etna_acc_query, aq, &ctx->active_acc_queries, node)
+      etna_acc_query_resume(aq, ctx);
 
    ctx->needs_gpu_state_reset = true;
 }
@@ -687,13 +686,10 @@ static void
 etna_context_force_flush(struct etna_cmd_stream *stream, void *priv)
 {
    struct pipe_context *pctx = priv;
-   struct etna_context *ctx = etna_context(pctx);
+
+   assert(!etna_context(pctx)->in_atomic_emit);
 
    etna_flush(pctx, NULL, 0, true);
-
-   /* update derived states as the context is now fully dirty */
-   if (ctx->in_draw_vbo)
-      etna_state_update(ctx);
 }
 
 void

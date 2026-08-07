@@ -38,6 +38,11 @@ struct pan_compile_inputs {
    bool no_idvs;
    uint32_t view_mask;
 
+   /* Number of colour buffers gl_FragColor broadcasts to.  Only useful for
+    * OpenGL shaders, leave at 0 otherwise.
+    */
+   uint8_t fragcolor_nr_cbufs;
+
    nir_variable_mode robust_modes;
    /* Whether or not descriptor accesses should add additional robustness
     * checks. */
@@ -45,11 +50,6 @@ struct pan_compile_inputs {
 
    /* Varying layout in memory, if known */
    const struct pan_varying_layout *varying_layout;
-
-   /* Optimizations as nir_opt_varyings can erase all flat types to float, when
-    * this field is false, varying types are inferred from their usage.
-    */
-   bool trust_varying_flat_highp_types;
 
    /* Settings to move constants into the FAU. */
    struct {
@@ -355,9 +355,7 @@ void pan_build_varying_layout_compact(struct pan_varying_layout *layout,
                                       nir_shader *nir, uint64_t gpu_id);
 
 void pan_varying_collect_formats(struct pan_varying_layout *registry,
-                                 nir_shader *nir, uint64_t gpu_id,
-                                 bool trust_varying_flat_highp_types,
-                                 bool lower_mediump);
+                                 nir_shader *nir, uint64_t gpu_id);
 
 struct pan_shader_varying {
    gl_varying_slot location;

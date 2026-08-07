@@ -16,6 +16,7 @@
 #include "kk_wsi.h"
 
 #include "kosmickrisp/bridge/mtl_bridge.h"
+#include "kosmickrisp/bridge/ns_process_info.h"
 
 #include "util/disk_cache.h"
 #include "util/mesa-blake3.h"
@@ -40,6 +41,7 @@ kk_get_vk_version()
 
 static void
 kk_get_device_extensions(const struct kk_instance *instance,
+                         const struct kk_env_settings *settings,
                          struct vk_device_extension_table *ext)
 {
    *ext = (struct vk_device_extension_table){
@@ -179,6 +181,7 @@ kk_get_device_extensions(const struct kk_instance *instance,
       .EXT_external_memory_host = true,
       .EXT_hdr_metadata = true,
       .EXT_image_2d_view_of_3d = true,
+      .EXT_image_view_min_lod = KK_EXPERIMENTAL(IMAGE_VIEW_MIN_LOD),
       .EXT_load_store_op_none = true,
       .EXT_map_memory_placed = true,
       .EXT_memory_budget = true,
@@ -188,6 +191,7 @@ kk_get_device_extensions(const struct kk_instance *instance,
       .EXT_post_depth_coverage = true,
       .EXT_primitive_restart_index = true,
       .EXT_primitive_topology_list_restart = true,
+      .EXT_provoking_vertex = true,
       .EXT_robustness2 = true,
       .EXT_sample_locations = true,
       .EXT_shader_atomic_float = true,
@@ -452,12 +456,16 @@ kk_get_device_features(
       .extendedDynamicState3DepthClampEnable = true,
       .extendedDynamicState3DepthClipNegativeOneToOne = true,
       .extendedDynamicState3LineRasterizationMode = true,
+      .extendedDynamicState3ProvokingVertexMode = true,
       .extendedDynamicState3SampleLocationsEnable = true,
       .extendedDynamicState3TessellationDomainOrigin = true,
 
       /* EXT_image_2d_view_of_3d */
       .image2DViewOf3D = true,
       .sampler2DViewOf3D = true,
+
+      /* VK_EXT_image_view_min_lod */
+      .minLod = supported_extensions->EXT_image_view_min_lod,
 
       /* VK_EXT_map_memory_placed */
       .memoryMapPlaced = true,
@@ -478,6 +486,9 @@ kk_get_device_features(
       /* VK_EXT_primitive_topology_list_restart */
       .primitiveTopologyListRestart = true,
       .primitiveTopologyPatchListRestart = false,
+
+      /* VK_EXT_provoking_vertex */
+      .provokingVertexLast = true,
 
       /* VK_EXT_shader_replicated_composites */
       .shaderReplicatedComposites = true,
@@ -1081,6 +1092,38 @@ get_metal_limits(struct kk_physical_device *pdev)
    assert(pdev->info.supported_sample_counts <= (KK_MAX_SAMPLES << 1) - 1);
 }
 
+static void
+kk_parse_environment_options(struct kk_physical_device *pdev)
+{
+   struct kk_env_settings *settings = &pdev->settings;
+
+   settings->gpu_capture_enabled =
+      debug_get_bool_option("MESA_KK_GPU_CAPTURE", false);
+
+   const char *list = debug_get_option("MESA_KK_DISABLE_WORKAROUNDS", "");
+   const char *all_workarounds = "all";
+   const size_t all_len = strlen(all_workarounds);
+   for (unsigned n; n = strcspn(list, ","), *list; list += MAX2(1, n)) {
+      if (n == all_len && !strncmp(list, all_workarounds, n)) {
+         settings->disabled_workarounds = UINT64_MAX;
+         break;
+      }
+
+      int index = atoi(list);
+      settings->disabled_workarounds |= BITFIELD64_BIT(index);
+   }
+
+   /* Workarounds resolved on macOS 27 */
+   if (ns_is_os_version_at_least(27, 0, 0)) {
+      settings->disabled_workarounds |= BITFIELD64_MASK(7);
+      settings->disabled_workarounds |= BITFIELD64_BIT(12);
+   }
+   /* M5-only workarounds */
+   if (pdev->info.gpu_apple_family < 10) {
+      settings->disabled_workarounds |= BITFIELD64_BIT(16);
+   }
+}
+
 VkResult
 kk_enumerate_physical_devices(struct vk_instance *_instance)
 {
@@ -1101,6 +1144,7 @@ kk_enumerate_physical_devices(struct vk_instance *_instance)
       goto fail_alloc;
    }
    get_metal_limits(pdev);
+   kk_parse_environment_options(pdev);
 
    struct vk_physical_device_dispatch_table dispatch_table;
    vk_physical_device_dispatch_table_from_entrypoints(
@@ -1109,7 +1153,7 @@ kk_enumerate_physical_devices(struct vk_instance *_instance)
       &dispatch_table, &wsi_physical_device_entrypoints, false);
 
    struct vk_device_extension_table supported_extensions;
-   kk_get_device_extensions(instance, &supported_extensions);
+   kk_get_device_extensions(instance, &pdev->settings, &supported_extensions);
 
    struct vk_features supported_features;
    kk_get_device_features(&supported_extensions, &supported_features);

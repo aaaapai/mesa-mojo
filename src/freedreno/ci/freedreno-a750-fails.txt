@@ -30,10 +30,6 @@ spec@ext_image_dma_buf_import@ext_image_dma_buf_import-sample_yvu420,Fail
 #Expected CL error: CL_LINK_PROGRAM_FAILURE -17
 api@cllinkprogram,Fail
 
-# https://gitlab.freedesktop.org/mesa/mesa/-/issues/8408
-program@execute@global-offset,Fail
-program@execute@global-offset@3d- input dependent,Fail
-
 # Regressed between https://gitlab.freedesktop.org/mesa/mesa/-/jobs/70146138 and https://gitlab.freedesktop.org/mesa/mesa/-/jobs/70217173
 program@execute@vector-conversion,Fail
 
@@ -70,6 +66,8 @@ angle-dEQP-GLES2.functional.shaders.algorithm.rgb_to_hsl_vertex,Fail
 # Enabled by EXT_shader_image_atomic_int64:
 # https://github.com/HansKristian-Work/vkd3d-proton/blob/master/docs/sampler_feedback.md
 vkd3d-test_sampler_feedback_implicit_lod_aniso,Fail
+
+vkd3d-test_buffer_descriptor_byte_offset,Fail
 
 # VKCTS 1.4.5.3 -> 1.4.6.1 uprev
 # deqp-vk: ../src/freedreno/ir3/ir3_image.c:101: ir3_get_type_for_image_intrinsic: Assertion `bit_size != 64 || instr->intrinsic == nir_intrinsic_bindless_image_atomic || instr->intrinsic == nir_intrinsic_bindless_image_atomic_swap' failed.

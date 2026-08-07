@@ -16,6 +16,7 @@
 #include "panvk_device.h"
 #include "panvk_instance.h"
 #include "panvk_mempool.h"
+#include "panvk_nir.h"
 #include "panvk_physical_device.h"
 #include "panvk_sampler.h"
 #include "panvk_shader.h"
@@ -823,6 +824,12 @@ panvk_lower_nir(struct panvk_device *dev, nir_shader *nir,
 {
    mesa_shader_stage stage = nir->info.stage;
 
+   /* Run before descriptor and explicit-IO lowering so the memory derefs this
+    * pass emits get lowered by them.
+    */
+   NIR_PASS(_, nir, panvk_nir_lower_cooperative_matrix,
+            pan_subgroup_size(PAN_ARCH));
+
    const nir_opt_access_options access_options = {
       .is_vulkan = true,
    };
@@ -962,6 +969,8 @@ panvk_lower_nir_io(nir_shader *nir)
     * instructions.
     */
    NIR_PASS(_, nir, nir_opt_constant_folding);
+
+   pan_nir_lower_mediump_io(nir);
 }
 
 static VkResult
@@ -1425,12 +1434,9 @@ panvk_compile_shader(struct panvk_device *dev,
          /* This somehow folds the location for multi-slot nir_load/nir_store */
          NIR_PASS(_, nir, nir_opt_constant_folding);
 
-         inputs.trust_varying_flat_highp_types = true;
          struct pan_varying_layout varying_layout;
          if (v == PANVK_VS_VARIANT_HW) {
-            pan_varying_collect_formats(&varying_layout, nir, inputs.gpu_id,
-                                        inputs.trust_varying_flat_highp_types,
-                                        true);
+            pan_varying_collect_formats(&varying_layout, nir, inputs.gpu_id);
             pan_build_varying_layout_compact(&varying_layout, nir,
                                              inputs.gpu_id);
             inputs.varying_layout = &varying_layout;
@@ -1491,7 +1497,8 @@ panvk_compile_shader(struct panvk_device *dev,
        * to a driver-provided FAU instead of using the blend descriptors
        * uploaded by the hardware.  See panvk_vX_blend.c for details.
        */
-      NIR_PASS(_, nir, pan_nir_lower_fs_outputs, false);
+      NIR_PASS(_, nir, pan_nir_lower_fs_outputs, false,
+               0 /* fragcolor_nr_cbufs */);
 
       variant->own_bin = true;
 

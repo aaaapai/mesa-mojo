@@ -97,6 +97,7 @@ fn nir_opts(arch: u8, merge_wg: bool) -> nir_shader_compiler_options {
         } else {
             0
         },
+        lower_mediump_io: Some(pan_nir_lower_mediump_io),
         ..Default::default()
     }
 }
@@ -215,11 +216,21 @@ pub extern "C" fn kraid_compile_nir(
     pass!(s.lower_mkvec_swz());
     pass!(s.opt_dce());
     pass!(s.lower_small_constants());
+    pass!(s.opt_promote_consts(&mut info.fau));
     pass!(s.legalize());
     // Shader::assign_registers() uses pass!() internally
     s.assign_registers();
     pass!(s.lower_copy());
+
+    // These have to happen after register allocation because they may add
+    // critical edges.
+    pass!(s.opt_jump_thread());
+    pass!(s.opt_fall_through());
+
+    // These have to happen last since we can't remove any instructions after
+    // they've completed.
     pass!(s.assign_message_slots());
+    pass!(s.mark_reconvergence());
 
     info.stats = s.get_stats();
 

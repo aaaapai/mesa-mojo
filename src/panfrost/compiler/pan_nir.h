@@ -180,6 +180,57 @@ pan_nir_load_va_tex_samples(nir_builder *b, nir_def *handle)
    return nir_if_phi(b, samples, zero);
 }
 
+struct pan_nir_add_imm {
+   nir_def *def;
+   uint8_t def_comp;
+   int64_t imm;
+};
+
+static inline struct pan_nir_add_imm
+pan_nir_def_as_add_imm(nir_def *def, uint8_t imm_bits, bool imm_sign)
+{
+   struct pan_nir_add_imm orig = { def };
+
+   nir_scalar s = nir_get_scalar(def, 0);
+   if (!nir_scalar_is_alu(s) || nir_scalar_alu_op(s) != nir_op_iadd)
+      return orig;
+
+   nir_scalar x = nir_scalar_chase_alu_src(s, 0);
+   nir_scalar y = nir_scalar_chase_alu_src(s, 1);
+
+   nir_scalar i;
+   if (nir_scalar_is_const(x)) {
+      i = x;
+      s = y;
+   } else if (nir_scalar_is_const(y)) {
+      i = y;
+      s = x;
+   } else {
+      return orig;
+   }
+
+   struct pan_nir_add_imm add_imm = {
+      .def = s.def,
+      .def_comp = (uint8_t)s.comp,
+   };
+
+   if (imm_sign) {
+      int64_t imm = nir_scalar_as_int(i);
+      if (imm < u_intN_min(imm_bits) || imm > u_intN_max(imm_bits))
+         return orig;
+
+      add_imm.imm = imm;
+      return add_imm;
+   } else {
+      uint64_t imm = nir_scalar_as_uint(i);
+      if (imm > u_uintN_max(imm_bits))
+         return orig;
+
+      add_imm.imm = imm;
+      return add_imm;
+   }
+}
+
 bool pan_nir_lower_bool_to_bitsize(nir_shader *shader);
 
 bool pan_nir_lower_vertex_id(nir_shader *shader);
@@ -205,6 +256,7 @@ bool pan_nir_lower_fs_inputs(nir_shader *shader, uint64_t gpu_id,
 
 bool pan_nir_lower_helper_invocation(nir_shader *shader);
 bool pan_nir_lower_sample_pos(nir_shader *shader);
+bool pan_nir_remove_xfb(nir_shader *nir);
 
 bool pan_nir_lower_image_index(nir_shader *shader,
                                unsigned vs_img_attrib_offset);
@@ -251,6 +303,8 @@ struct pan_va_tex_flags {
 PRAGMA_DIAGNOSTIC_POP
 static_assert(sizeof(struct pan_va_tex_flags) == 4, "Must fit in uint32_t");
 
+void pan_nir_lower_mediump_io(nir_shader *nir);
+
 bool pan_nir_lower_tex(nir_shader *nir, uint64_t gpu_id);
 bool pan_nir_lower_image(nir_shader *nir, uint64_t gpu_id);
 
@@ -265,11 +319,13 @@ bool pan_nir_lower_framebuffer(nir_shader *shader,
                                unsigned blend_shader_nr_samples,
                                bool broken_ld_special);
 
-bool pan_nir_lower_fs_outputs(nir_shader *shader, bool skip_atest);
+bool pan_nir_lower_fs_outputs(nir_shader *shader, bool skip_atest,
+                              unsigned fragcolor_nr_cbufs);
 
 uint32_t pan_nir_collect_noperspective_varyings_fs(nir_shader *s);
 
 bool pan_nir_resize_varying_io(nir_shader *nir,
+                               const struct pan_varying_layout *varying_fmt,
                                const struct pan_varying_layout *varying_layout);
 
 bool pan_nir_fuse_io_cvt(nir_shader *nir, uint64_t gpu_id,

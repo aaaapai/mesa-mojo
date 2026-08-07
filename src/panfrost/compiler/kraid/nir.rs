@@ -139,19 +139,18 @@ impl<'a> ShaderFromNir<'a> {
         self.get_src_ssa(src).into()
     }
 
-    fn get_alu_src(&self, src: &nir_alu_src, comps: u8) -> Src {
-        let src_vec = self.get_ssa(src.src.as_def());
-
-        match src.src.as_def().bit_size {
+    fn get_swiz_src(&self, def: &nir_def, swizzle: &[u8]) -> Src {
+        let src_vec = self.get_ssa(def);
+        match def.bit_size {
             8 => {
-                assert!(comps <= 4);
-                let w = src.swizzle[0] / 4;
-                let mut bytes = [src.swizzle[0] % 4; 4];
-                for i in 1..usize::from(comps) {
-                    assert!(src.swizzle[i] / 4 == w);
-                    bytes[i] = src.swizzle[i] % 4;
+                assert!(swizzle.len() <= 4);
+                let w = swizzle[0] / 4;
+                let mut bytes = [swizzle[0] % 4; 4];
+                for i in 1..swizzle.len() {
+                    assert!(swizzle[i] / 4 == w);
+                    bytes[i] = swizzle[i] % 4;
                 }
-                if comps == 2 {
+                if swizzle.len() == 2 {
                     // For vec2's, make it symmetric
                     bytes[2] = bytes[0];
                     bytes[3] = bytes[1];
@@ -160,29 +159,46 @@ impl<'a> ShaderFromNir<'a> {
                 Src::from(src_vec[usize::from(w)]).swizzle(swizzle)
             }
             16 => {
-                assert!(comps <= 2);
-                let w = src.swizzle[0] / 2;
-                let mut halves = [src.swizzle[0] % 2; 2];
-                if comps == 2 {
-                    assert!(src.swizzle[1] / 2 == w);
-                    halves[1] = src.swizzle[1] % 2;
+                assert!(swizzle.len() <= 2);
+                let w = swizzle[0] / 2;
+                let mut halves = [swizzle[0] % 2; 2];
+                if swizzle.len() == 2 {
+                    assert!(swizzle[1] / 2 == w);
+                    halves[1] = swizzle[1] % 2;
                 }
                 let swizzle = Swizzle::from_halves(halves);
                 Src::from(src_vec[usize::from(w)]).swizzle(swizzle)
             }
             32 => {
-                assert!(comps == 1);
-                src_vec[usize::from(src.swizzle[0])].into()
+                assert_eq!(swizzle.len(), 1);
+                src_vec[usize::from(swizzle[0])].into()
             }
             64 => {
-                assert!(comps == 1);
+                assert_eq!(swizzle.len(), 1);
                 [
-                    src_vec[usize::from(src.swizzle[0]) * 2],
-                    src_vec[usize::from(src.swizzle[0]) * 2 + 1],
+                    src_vec[usize::from(swizzle[0]) * 2],
+                    src_vec[usize::from(swizzle[0]) * 2 + 1],
                 ]
                 .into()
             }
             bit_size => panic!("Unsupported bit size: {bit_size}"),
+        }
+    }
+
+    fn get_alu_src(&self, src: &nir_alu_src, comps: u8) -> Src {
+        self.get_swiz_src(src.src.as_def(), &src.swizzle[..usize::from(comps)])
+    }
+
+    fn get_src_add_imm(
+        &self,
+        src: &nir_src,
+        imm_bits: u8,
+        imm_sign: bool,
+    ) -> (Src, i64) {
+        unsafe {
+            let add_imm = pan_nir_def_as_add_imm(src.ssa, imm_bits, imm_sign);
+            let src = self.get_swiz_src(&*add_imm.def, &[add_imm.def_comp]);
+            (src, add_imm.imm)
         }
     }
 
@@ -963,9 +979,10 @@ impl<'a> ShaderFromNir<'a> {
                 });
             }
             nir_op_imul => {
+                assert!(alu.def.bit_size <= 32);
                 b.push_op(OpIMul {
                     dst: dst.into(),
-                    dst_type: dst_type(NumericType::SignedInteger),
+                    dst_type: dst_type(NumericType::Integer),
                     saturate: false,
                     srcs: [srcs(0), srcs(1)],
                 });
@@ -1474,6 +1491,57 @@ impl<'a> ShaderFromNir<'a> {
                     _ => panic!("Unsupported barrier scope"),
                 }
             }
+            nir_intrinsic_cmat_muladd_pan => {
+                let src_a = self.get_src(&srcs[0]);
+                let src_b = self.get_src(&srcs[1]);
+                let src_c = self.get_src(&srcs[2]);
+                let dst = self.alloc_ssa(b, &intrin.def);
+                let mul_type = match intrin.src_type() {
+                    ALUType::INT8 => DataType::V4S8,
+                    ALUType::UINT8 => DataType::V4U8,
+                    ALUType::FLOAT16 => DataType::V2F16,
+                    ALUType::FLOAT32 => DataType::F32,
+                    _ => panic!("Invalid NIR ALU type"),
+                };
+
+                match mul_type {
+                    DataType::V4S8 | DataType::V4U8 => {
+                        b.push_op(OpMMulI32 {
+                            dst: dst.into(),
+                            mul_type,
+                            saturate: false,
+                            a_type: mul_type,
+                            b_type: mul_type,
+                            a: src_a,
+                            b: src_b,
+                            c: src_c,
+                        });
+                    }
+                    DataType::V2F16 => {
+                        b.push_op(OpMMulF32 {
+                            dst: dst.into(),
+                            src_type: mul_type,
+                            a_submat: F16SubMat::F0,
+                            b_submat: F16SubMat::F0,
+                            a: src_a,
+                            b: src_b,
+                            c: src_c,
+                        });
+                    }
+                    DataType::F32 => {
+                        b.push_op(OpMMulF32 {
+                            dst: dst.into(),
+                            src_type: mul_type,
+                            a_submat: F16SubMat::None,
+                            b_submat: F16SubMat::None,
+                            a: src_a,
+                            b: src_b,
+                            c: src_c,
+                        });
+                    }
+                    _ => unreachable!(),
+                }
+            }
             nir_intrinsic_cubeface_pan => {
                 let x = self.get_src(&srcs[0]);
                 let y = self.get_src(&srcs[1]);
@@ -1562,7 +1630,7 @@ impl<'a> ShaderFromNir<'a> {
                     self.alloc_ssa(b, &intrin.def).into()
                 };
 
-                let addr = self.get_src(&srcs[0]);
+                let (addr, offset) = self.get_src_add_imm(&srcs[0], 8, false);
                 let data = self.get_src(&srcs[1]);
                 if let Some(atom1_op) =
                     srcs[1].as_int().and_then(|data| atom_op.as_atom1(data))
@@ -1572,7 +1640,7 @@ impl<'a> ShaderFromNir<'a> {
                         data_type: DataType::i(intrin.def.bit_size),
                         atom_op: atom1_op,
                         addr,
-                        offset: 0,
+                        offset: offset.try_into().unwrap(),
                     });
                 } else {
                     b.push_op(OpAtom {
@@ -1581,12 +1649,12 @@ impl<'a> ShaderFromNir<'a> {
                         atom_op,
                         data,
                         addr,
-                        offset: 0,
+                        offset: offset.try_into().unwrap(),
                     });
                 }
             }
             nir_intrinsic_global_atomic_swap => {
-                let addr = self.get_src(&srcs[0]);
+                let (addr, offset) = self.get_src_add_imm(&srcs[0], 8, false);
                 let cmpr = self.get_src_ssa(&srcs[1]);
                 let data = self.get_src_ssa(&srcs[2]);
                 let data = SSARef::from_iter(
@@ -1598,7 +1666,7 @@ impl<'a> ShaderFromNir<'a> {
                     data_type: DataType::i(intrin.def.bit_size),
                     data: data.into(),
                     addr,
-                    offset: 0,
+                    offset: offset.try_into().unwrap(),
                 });
             }
             nir_intrinsic_lea_buf_pan => {
@@ -1619,7 +1687,7 @@ impl<'a> ShaderFromNir<'a> {
             }
             nir_intrinsic_load_global | nir_intrinsic_load_global_constant => {
                 let bits = intrin.def.bit_size * intrin.def.num_components;
-                let addr = self.get_src(&srcs[0]);
+                let (addr, offset) = self.get_src_add_imm(&srcs[0], 16, true);
                 let dst = self.alloc_ssa(b, &intrin.def).into();
                 b.push_op(OpLoad {
                     dst,
@@ -1627,7 +1695,7 @@ impl<'a> ShaderFromNir<'a> {
                     is_tls: (intrin.access() & ACCESS_INCLUDE_HELPERS) != 0,
                     access: mem_access_from_nir(intrin),
                     addr,
-                    offset: 0,
+                    offset: offset.try_into().unwrap(),
                 });
             }
             nir_intrinsic_load_global_cvt_pan => {
@@ -1647,7 +1715,7 @@ impl<'a> ShaderFromNir<'a> {
                     intrin.def.bit_size,
                 );
 
-                let addr = self.get_src(&srcs[0]);
+                let (addr, offset) = self.get_src_add_imm(&srcs[0], 8, false);
                 let cvt = self.get_src(&srcs[1]);
                 let dst = self.alloc_ssa(b, &intrin.def).into();
                 b.push_op(OpLdCvt {
@@ -1656,7 +1724,7 @@ impl<'a> ShaderFromNir<'a> {
                     access: mem_access_from_nir(intrin),
                     addr,
                     cvt,
-                    offset: 0,
+                    offset: offset.try_into().unwrap(),
                 });
             }
             nir_intrinsic_load_scratch_base_ptr => {
@@ -1767,7 +1835,7 @@ impl<'a> ShaderFromNir<'a> {
                 } else if bits == 16 {
                     data = data.half(0);
                 }
-                let addr = self.get_src(&srcs[1]);
+                let (addr, offset) = self.get_src_add_imm(&srcs[1], 16, true);
                 let is_psiz =
                     intrin.intrinsic == nir_intrinsic_store_global_psiz_pan;
                 b.push_op(OpStore {
@@ -1777,7 +1845,7 @@ impl<'a> ShaderFromNir<'a> {
                     access: mem_access_from_nir(intrin),
                     data,
                     addr,
-                    offset: 0,
+                    offset: offset.try_into().unwrap(),
                 });
             }
             nir_intrinsic_store_global_cvt_pan => {
@@ -1804,7 +1872,7 @@ impl<'a> ShaderFromNir<'a> {
                 } else if bits == 16 {
                     data = data.half(0);
                 }
-                let addr = self.get_src(&srcs[1]);
+                let (addr, offset) = self.get_src_add_imm(&srcs[1], 8, false);
                 let cvt = self.get_src(&srcs[2]);
                 b.push_op(OpStCvt {
                     src_type,
@@ -1812,7 +1880,7 @@ impl<'a> ShaderFromNir<'a> {
                     data,
                     addr,
                     cvt,
-                    offset: 0,
+                    offset: offset.try_into().unwrap(),
                 });
             }
             nir_intrinsic_load_local_invocation_id => {

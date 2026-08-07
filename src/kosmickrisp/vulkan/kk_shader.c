@@ -157,6 +157,7 @@ kk_populate_fs_key(struct kk_fs_key *key,
 enum kk_feature_key {
    KK_FEAT_CUSTOM_BORDER = BITFIELD_BIT(0),
    KK_FEAT_NULL_DESCRIPTOR = BITFIELD_BIT(1),
+   KK_FEAT_IMAGE_VIEW_MIN_LOD = BITFIELD_BIT(2),
 };
 
 static enum kk_feature_key
@@ -167,6 +168,8 @@ kk_make_feature_key(const struct vk_features *feats)
       key |= KK_FEAT_CUSTOM_BORDER;
    if (feats->nullDescriptor)
       key |= KK_FEAT_NULL_DESCRIPTOR;
+   if (feats->minLod)
+      key |= KK_FEAT_IMAGE_VIEW_MIN_LOD;
    return key;
 }
 
@@ -440,6 +443,8 @@ static void
 kk_lower_fs(struct kk_device *dev, nir_shader *nir,
             const struct vk_graphics_pipeline_state *state)
 {
+   struct kk_physical_device *pdev = kk_device_physical(dev);
+
    nir->info.fs.uses_sample_shading |=
       state->ms && state->ms->sample_shading_enable;
 
@@ -484,7 +489,7 @@ kk_lower_fs(struct kk_device *dev, nir_shader *nir,
        state->ms->sample_mask != UINT16_MAX) {
 
       /* KK_WORKAROUND_7 */
-      if (!(dev->disabled_workarounds & BITFIELD64_BIT(7))) {
+      if (!(pdev->settings.disabled_workarounds & BITFIELD64_BIT(7))) {
          if (!nir->info.fs.early_fragment_tests) {
             nir_function_impl *entrypoint = nir_shader_get_entrypoint(nir);
             nir_builder b = nir_builder_at(nir_after_impl(entrypoint));
@@ -523,10 +528,10 @@ kk_lower_fs(struct kk_device *dev, nir_shader *nir,
    }
 
    /* KK_WORKAROUND_5 */
-   if (!(dev->disabled_workarounds & BITFIELD64_BIT(5)))
+   if (!(pdev->settings.disabled_workarounds & BITFIELD64_BIT(5)))
       NIR_PASS(_, nir, msl_nir_fake_guard_for_discards);
    /* KK_WORKAROUND_4 */
-   if (!(dev->disabled_workarounds & BITFIELD64_BIT(4))) {
+   if (!(pdev->settings.disabled_workarounds & BITFIELD64_BIT(4))) {
       NIR_PASS(_, nir, nir_lower_helper_writes, true);
       NIR_PASS(_, nir, nir_lower_is_helper_invocation);
    }
@@ -540,6 +545,8 @@ kk_lower_nir(struct kk_device *dev, nir_shader *nir, bool emulated_stage,
              const struct vk_graphics_pipeline_state *state,
              enum kk_feature_key features)
 {
+   struct kk_physical_device *pdev = kk_device_physical(dev);
+
    if (nir->info.io_lowered)
       return;
 
@@ -643,6 +650,9 @@ kk_lower_nir(struct kk_device *dev, nir_shader *nir, bool emulated_stage,
    if (features & KK_FEAT_CUSTOM_BORDER)
       NIR_PASS(_, nir, kk_nir_lower_custom_border);
 
+   if (features & KK_FEAT_IMAGE_VIEW_MIN_LOD)
+      NIR_PASS(_, nir, kk_nir_lower_image_view_min_lod);
+
    /* Descriptor lowering needs to happen after lowering blend since we will
     * generate a nir_intrinsic_load_blend_const_color_rgba which gets lowered by
     * the lower descriptor pass
@@ -654,7 +664,7 @@ kk_lower_nir(struct kk_device *dev, nir_shader *nir, bool emulated_stage,
     * lowers all image intrinsics to be bindless */
    if (rs->images ==
           VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_ROBUST_IMAGE_ACCESS_2 &&
-       !(dev->disabled_workarounds & BITFIELD64_BIT(16)))
+       !(pdev->settings.disabled_workarounds & BITFIELD64_BIT(16)))
       NIR_PASS(_, nir, msl_lower_robustness2_images);
 
    NIR_PASS(_, nir, kk_nir_lower_textures);
@@ -723,6 +733,23 @@ gather_vs_inputs(nir_builder *b, nir_intrinsic_instr *intr, void *data)
    return false;
 }
 
+static bool
+fs_uses_flat_varying(nir_shader *nir)
+{
+   nir_foreach_function_impl(impl, nir) {
+      nir_foreach_block_safe(block, impl) {
+         nir_foreach_instr_safe(instr, block) {
+            if (instr->type == nir_instr_type_intrinsic) {
+               nir_intrinsic_instr *intr = nir_instr_as_intrinsic(instr);
+               if (intr->intrinsic == nir_intrinsic_load_input)
+                  return true;
+            }
+         }
+      }
+   }
+   return false;
+}
+
 static void
 gather_shader_info(struct kk_shader *shader, nir_shader *nir,
                    const struct vk_graphics_pipeline_state *state)
@@ -739,6 +766,7 @@ gather_shader_info(struct kk_shader *shader, nir_shader *nir,
        * which is not a valid Metal layout */
       if (nir->info.fs.depth_layout == FRAG_DEPTH_LAYOUT_NONE)
          nir->info.fs.depth_layout = FRAG_DEPTH_LAYOUT_ANY;
+      shader->info.fs.uses_flat_varyings = fs_uses_flat_varying(nir);
    } else if (nir->info.stage == MESA_SHADER_COMPUTE) {
       shader->info.cs.local_size.x = nir->info.workgroup_size[0];
       shader->info.cs.local_size.y = nir->info.workgroup_size[1];
@@ -815,6 +843,7 @@ kk_compile_shader(struct kk_device *dev, nir_shader *nir,
                   struct kk_shader **shader_out)
 {
    assert(nir->info.io_lowered && "nir must have lowered io");
+   struct kk_physical_device *pdev = kk_device_physical(dev);
 
    struct kk_shader *shader;
    VkResult result = VK_SUCCESS;
@@ -883,7 +912,7 @@ kk_compile_shader(struct kk_device *dev, nir_shader *nir,
 
    struct nir_to_msl_options translate_options = {
       .mem_ctx = NULL,
-      .disabled_workarounds = dev->disabled_workarounds,
+      .disabled_workarounds = pdev->settings.disabled_workarounds,
    };
    if (nir->info.stage == MESA_SHADER_FRAGMENT) {
       for (uint32_t i = 0u; i < MAX_DRAW_BUFFERS; ++i) {
@@ -1354,6 +1383,7 @@ kk_compile_shaders(struct vk_device *device, uint32_t shader_count,
 {
    VkResult result = VK_SUCCESS;
    struct kk_device *dev = container_of(device, struct kk_device, vk);
+   struct kk_physical_device *pdev = kk_device_physical(dev);
 
    enum kk_feature_key features = kk_make_feature_key(enabled_features);
 
@@ -1384,7 +1414,7 @@ kk_compile_shaders(struct vk_device *device, uint32_t shader_count,
       bool emulated_stage = tess && (nir->info.stage == MESA_SHADER_VERTEX ||
                                      nir->info.stage == MESA_SHADER_TESS_CTRL);
 
-      msl_preprocess_nir_workarounds(nir, dev->disabled_workarounds);
+      msl_preprocess_nir_workarounds(nir, pdev->settings.disabled_workarounds);
       kk_lower_nir(dev, nir, emulated_stage, info->robustness,
                    info->set_layout_count, info->set_layouts, state, features);
 
