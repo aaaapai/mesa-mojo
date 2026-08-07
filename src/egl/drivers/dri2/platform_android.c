@@ -99,11 +99,11 @@ droid_open_device_kgsl(_EGLDisplay *disp, bool swrast)
 
    int fd = open("/dev/kgsl-3d0", O_RDWR | O_CLOEXEC | O_NONBLOCK);
    printf("Opening /dev/kgsl-3d0, O_RDWR | O_CLOEXEC | O_NONBLOCK...\n");
-   if (fd < 0) {
+   if (fd == -1) {
       fd = loader_open_device(path);
    }
 
-   if (fd < 0) {
+   if (fd == -1) {
       _eglLog(_EGL_WARNING, "Failed to open kgsl device");
       return EGL_FALSE;
    }
