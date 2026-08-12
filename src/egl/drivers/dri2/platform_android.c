@@ -1204,7 +1204,9 @@ droid_load_driver(_EGLDisplay *disp, bool swrast)
       return false;
 
    if (swrast && !disp->Options.Zink) {
-      if (strcmp(dri2_dpy->driver_name, "vgem") == 0 ||
+      if (strcmp(dri2_dpy->driver_name, "freedreno") == 0 || strcmp(dri2_dpy->driver_name, "kgsl") == 0) {
+         /* keep */
+      } else if (strcmp(dri2_dpy->driver_name, "vgem") == 0 ||
                  strcmp(dri2_dpy->driver_name, "virtio_gpu") == 0) {
          free(dri2_dpy->driver_name);
          dri2_dpy->driver_name = strdup("kms_swrast");
