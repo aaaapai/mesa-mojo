@@ -42,10 +42,6 @@ fd_device_new(int fd)
 #ifdef HAVE_LIBDRM
     /* figure out if we are kgsl or msm drm driver: */
     version = drmGetVersion(fd);
-   if (!version) {
-      ERROR_MSG("cannot get version: %s", strerror(errno));
-      return NULL;
-   }
    if (!version)
       DEBUG_MSG("cannot get version: %s", strerror(errno));
 #endif
@@ -54,7 +50,6 @@ fd_device_new(int fd)
    version = drmGetVersion(fd);
    if (!version) {
       ERROR_MSG("cannot get version: %s", strerror(errno));
-      return NULL;
    }
 
 #ifdef HAVE_FREEDRENO_VIRTIO
