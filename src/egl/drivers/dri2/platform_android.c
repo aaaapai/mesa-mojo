@@ -93,31 +93,6 @@ droid_is_kgsl_fd(int fd)
    return ret == 0;
 }
 
-static EGLBoolean
-droid_open_device_kgsl(_EGLDisplay *disp, bool swrast)
-{
-   struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
-
-   int fd = open("/dev/kgsl-3d0", O_RDWR | O_CLOEXEC | O_NONBLOCK);
-   printf("Opening /dev/kgsl-3d0, O_RDWR | O_CLOEXEC | O_NONBLOCK...\n");
-   if (fd == -1) {
-      fd = loader_open_device("/dev/kgsl-3d0");
-   }
-
-   if (fd == -1) {
-      _eglLog(_EGL_WARNING, "Failed to open kgsl device");
-      return EGL_FALSE;
-   }
-
-   if (!droid_is_kgsl_fd(fd)) {
-      close(fd);
-      return EGL_FALSE;
-   }
-
-   dri2_dpy->fd_render_gpu = fd;
-   return EGL_TRUE;
-}
-
 static struct dri_image *
 droid_create_image_from_buffer_info(
    struct dri2_egl_display *dri2_dpy, int width, int height,
@@ -1423,6 +1398,7 @@ droid_open_device(_EGLDisplay *disp, bool swrast)
    if(droid_open_device_kgsl(disp, swrast))
       goto done;
 #endif
+
    return EGL_FALSE;
 
 done:
