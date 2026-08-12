@@ -4283,7 +4283,7 @@ zink_shader_compile(struct zink_screen *screen, bool can_shobj, struct zink_shad
             need_optimize = true;
          }
          if (zink_driverid(screen) == VK_DRIVER_ID_QUALCOMM_PROPRIETARY) {
-            NIR_PASS_V(nir, nir_opt_vectorize_io_vars, nir_var_shader_in);
+            NIR_PASS(_, nir, nir_opt_vectorize_io_vars, nir_var_shader_in);
             need_optimize = true;
          }
          break;
