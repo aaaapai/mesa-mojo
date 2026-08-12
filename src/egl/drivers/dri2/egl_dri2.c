@@ -852,7 +852,7 @@ dri2_setup_device(_EGLDisplay *disp, EGLBoolean software)
    _EGLDevice *dev;
    int render_fd;
 
-   if (disp->Options.Kgsl || disp->Options.Zink)
+   if (disp->Options.Kgsl)
       software = true;
 
    /* If we're not software, we need a DRM node FD */
