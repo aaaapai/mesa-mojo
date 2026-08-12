@@ -53,6 +53,7 @@
 #include "loader_dri_helper.h"
 #include "platform_android.h"
 #include "dri_util.h"
+#include "platform_android_airgap.h"
 
 /* KGSL ioctl definitions for device detection */
 #ifndef KGSL_IOCTL_GETPROPERTY
@@ -349,6 +350,10 @@ droid_create_surface(_EGLDisplay *disp, EGLint type, _EGLConfig *conf,
       _eglError(EGL_BAD_ALLOC, "droid_create_surface");
       return NULL;
    }
+   if(!dri2_dpy->kopper && droid_window_connect(window)) {
+         _eglError(EGL_BAD_NATIVE_WINDOW, "droid_create_surface");
+         goto cleanup_surface;
+   }
 
    dri2_surf->in_fence_fd = -1;
 
@@ -462,11 +467,15 @@ droid_create_pbuffer_surface(_EGLDisplay *disp, _EGLConfig *conf,
 static EGLBoolean
 droid_destroy_surface(_EGLDisplay *disp, _EGLSurface *surf)
 {
+   struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
    struct dri2_egl_surface *dri2_surf = dri2_egl_surface(surf);
 
    if (dri2_surf->base.Type == EGL_WINDOW_BIT) {
       if (dri2_surf->buffer)
          droid_window_cancel_buffer(dri2_surf);
+
+      if(!dri2_dpy->kopper)
+         droid_window_disconnect(dri2_surf->window);
 
       ANativeWindow_release(dri2_surf->window);
    }
@@ -1296,7 +1305,36 @@ droid_probe_device(_EGLDisplay *disp, bool swrast)
 }
 
 static EGLBoolean
-droid_open_device(_EGLDisplay *disp, bool swrast)
+droid_open_device_kgsl(_EGLDisplay *disp, bool swrast)
+{
+   struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
+   static const char path[] = "/dev/kgsl-3d0";
+   static const char driver_name[] = "kgsl";
+
+   dri2_dpy->fd_render_gpu = loader_open_device(path);
+   if (dri2_dpy->fd_render_gpu < 0) {
+      _eglLog(_EGL_WARNING, "Failed to open kgsl");
+      return EGL_FALSE;
+   }
+
+   dri2_dpy->driver_name = strdup(driver_name);
+   dri2_dpy->loader_extensions = droid_image_loader_extensions;
+
+   if (!dri2_create_screen(disp)) {
+      _eglLog(_EGL_WARNING, "DRI2: Failed to create screen");
+      droid_unload_driver(disp);
+      goto error;
+   }
+
+   return EGL_TRUE;
+error:
+   close(dri2_dpy->fd_render_gpu);
+   dri2_dpy->fd_render_gpu = -1;
+   return EGL_FALSE;
+}
+
+static EGLBoolean
+droid_open_device_drm(_EGLDisplay *disp, bool swrast)
 {
 #define MAX_DRM_DEVICES 64
    struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
@@ -1315,18 +1353,6 @@ droid_open_device(_EGLDisplay *disp, bool swrast)
    if (__system_property_get("drm.gpu.vendor_name", vendor_buf) > 0)
       vendor_name = vendor_buf;
 
-   /* 检查是否通过环境变量强制使用 kgsl */
-   const char *override = getenv("MESA_LOADER_DRIVER_OVERRIDE");
-   if (override && strcmp(override, "kgsl") == 0) {
-      if (droid_open_device_kgsl(disp, swrast)) {
-         /* 成功打开 kgsl，直接返回，不再尝试 DRM */
-         return EGL_TRUE;
-      }
-      /* 若 kgsl 打开失败，则继续尝试 DRM */
-      _eglLog(_EGL_WARNING, "kgsl open failed, falling back to DRM");
-   }
-
-   /* 以下是原有的 DRM 设备枚举逻辑 */
    while (dev_list) {
       if (!_eglDeviceSupports(dev_list, _EGL_DEVICE_DRM))
          goto next;
@@ -1381,6 +1407,25 @@ droid_open_device(_EGLDisplay *disp, bool swrast)
       return EGL_FALSE;
    }
 
+   return EGL_TRUE;
+}
+
+static EGLBoolean
+droid_open_device(_EGLDisplay *disp, bool swrast)
+{
+
+#ifdef HAVE_LIBDRM
+   if(droid_open_device_drm(disp, swrast))
+      goto done;
+#endif
+
+#ifdef HAVE_FREEDRENO_KGSL
+   if(droid_open_device_kgsl(disp, swrast))
+      goto done;
+#endif
+   return EGL_FALSE;
+
+done:
    return EGL_TRUE;
 }
 
@@ -1439,8 +1484,7 @@ dri2_initialize_android(_EGLDisplay *disp)
 
    dri2_dpy->fd_display_gpu = dri2_dpy->fd_render_gpu;
 
-   bool is_kgsl = (dri2_dpy->fd_render_gpu >= 0 && droid_is_kgsl_fd(dri2_dpy->fd_render_gpu));
-   if (!dri2_dpy->pure_swrast && !is_kgsl && !dri2_setup_device(disp, false)) {
+   if (!dri2_dpy->pure_swrast && strcmp(dri2_dpy->driver_name, "kgsl") != 0 && !dri2_setup_device(disp, false)) {
       err = "DRI2: failed to setup EGLDevice";
       goto cleanup;
    }
