@@ -1907,6 +1907,8 @@ struct anv_queue {
 
    struct anv_async_submit                  *init_submit;
    struct anv_async_submit                  *init_companion_submit;
+
+   uint64_t metrics_library_configuration;
 };
 
 struct nir_xfb_info;
@@ -6769,6 +6771,9 @@ struct anv_query_pool {
 
    /* Video encoding queries */
    VkVideoCodecOperationFlagsKHR                codec;
+
+   /* Metrics Library handle */
+   void*                                        metrics_library_query_pool;
 };
 
 static inline uint32_t khr_perf_query_preamble_offset(const struct anv_query_pool *pool,

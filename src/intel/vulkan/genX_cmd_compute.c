@@ -229,21 +229,21 @@ cmd_buffer_flush_compute_state(struct anv_cmd_buffer *cmd_buffer,
 #endif
 
    if (indirect_set == NULL &&
-       (cmd_buffer->state.push_constants_dirty & VK_SHADER_STAGE_COMPUTE_BIT)) {
-      if (bind_state->push_constants_state.alloc_size == 0) {
-         bind_state->push_constants_state =
-            anv_cmd_buffer_cs_push_constants(cmd_buffer);
-      }
+       bind_state->push_constants_state.alloc_size == 0) {
+      bind_state->push_constants_state =
+         anv_cmd_buffer_cs_push_constants(cmd_buffer);
+      cmd_buffer->state.push_constants_dirty |= VK_SHADER_STAGE_COMPUTE_BIT;
+   }
 
+   if (cmd_buffer->state.push_constants_dirty & VK_SHADER_STAGE_COMPUTE_BIT) {
 #if GFX_VERx10 < 125
-      if (bind_state->push_constants_state.alloc_size) {
+      if (bind_state->push_constants_state.alloc_size > 0) {
          anv_batch_emit(&cmd_buffer->batch, GENX(MEDIA_CURBE_LOAD), curbe) {
             curbe.CURBETotalDataLength    = bind_state->push_constants_state.alloc_size;
             curbe.CURBEDataStartAddress   = bind_state->push_constants_state.offset;
          }
       }
 #endif
-
       cmd_buffer->state.push_constants_dirty &= ~VK_SHADER_STAGE_COMPUTE_BIT;
    }
 
@@ -847,8 +847,8 @@ genX(cmd_dispatch_unaligned)(
 
    /* RT shaders have Y and Z local size set to 1 always. */
    assert(prog_data->local_size[1] == 1 && prog_data->local_size[2] == 1);
-   /* RT shaders dispatched with group Y and Z set to 1 always. */
-   assert(groupCountY == 1 && groupCountZ == 1);
+   /* RT shaders dispatched with group Z set to 1 always. */
+   assert(groupCountZ == 1);
 
    anv_measure_snapshot(cmd_buffer,
                         INTEL_SNAPSHOT_COMPUTE,

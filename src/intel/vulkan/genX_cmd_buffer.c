@@ -41,6 +41,9 @@
 #include "genX_mi_builder.h"
 #include "genX_cmd_draw_generated_flush.h"
 
+#include "perf/intel_perf.h"
+#include "perf/intel_perf_metrics_library.h"
+
 static void emit_pipe_control(struct anv_batch *batch,
                               const struct intel_device_info *devinfo,
                               uint32_t current_pipeline,
@@ -3503,11 +3506,13 @@ genX(flush_binding_mode)(struct anv_cmd_buffer *cmd_buffer,
          genX(cmd_buffer_emit_state_base_address)(cmd_buffer);
          sba_emitted_changed = true;
       }
+      cmd_buffer->state.descriptor_buffers.dirty = false;
 #else
       if (cmd_buffer->state.current_binding_mode != ANV_SHADER_BINDING_MODE_BUFFER ||
           cmd_buffer->state.descriptor_buffers.dirty) {
          genX(cmd_buffer_emit_state_base_address)(cmd_buffer);
          sba_emitted_changed = true;
+         cmd_buffer->state.descriptor_buffers.dirty = false;
       }
 #endif
       break;
@@ -3518,11 +3523,13 @@ genX(flush_binding_mode)(struct anv_cmd_buffer *cmd_buffer,
          genX(cmd_buffer_emit_state_base_address)(cmd_buffer);
          sba_emitted_changed = true;
       }
+      cmd_buffer->state.descriptor_heap.dirty = false;
 #else
       if (cmd_buffer->state.current_binding_mode != ANV_SHADER_BINDING_MODE_HEAP ||
           cmd_buffer->state.descriptor_heap.dirty) {
          genX(cmd_buffer_emit_state_base_address)(cmd_buffer);
          sba_emitted_changed = true;
+         cmd_buffer->state.descriptor_heap.dirty = false;
       }
 #endif
       break;
@@ -3543,10 +3550,7 @@ genX(flush_binding_mode)(struct anv_cmd_buffer *cmd_buffer,
    } while (0)
 
    switch (cmd_buffer->state.current_binding_mode) {
-   case ANV_SHADER_BINDING_MODE_HEAP:
-      if (!sba_emitted_changed && !cmd_buffer->state.descriptor_heap.dirty)
-         break;
-
+   case ANV_SHADER_BINDING_MODE_HEAP: {
 #if GFX_VERx10 < 125
       struct anv_device *device = cmd_buffer->device;
       UPDATE_PUSH(push->heap.surfaces_offset,
@@ -3569,12 +3573,11 @@ genX(flush_binding_mode)(struct anv_cmd_buffer *cmd_buffer,
          cmd_buffer->state.push_constants_dirty |= active_stages;
          bind_state->push_constants_state = ANV_STATE_NULL;
       }
-      cmd_buffer->state.descriptor_heap.dirty = false;
       break;
+   }
 
    case ANV_SHADER_BINDING_MODE_BUFFER:
       if (sba_emitted_changed ||
-          cmd_buffer->state.descriptor_buffers.dirty ||
           (active_stages & cmd_buffer->state.descriptor_buffers.offsets_dirty) != 0) {
          for (uint32_t i = 0; i < bind_state->max_bound_descriptors; i++) {
             update_descriptor_set_surface_state(cmd_buffer, bind_state, i);
@@ -3604,7 +3607,6 @@ genX(flush_binding_mode)(struct anv_cmd_buffer *cmd_buffer,
          }
          cmd_buffer->state.descriptor_buffers.offsets_dirty &= ~active_stages;
       }
-      cmd_buffer->state.descriptor_buffers.dirty = false;
       break;
 
    case ANV_SHADER_BINDING_MODE_LEGACY:
@@ -7395,7 +7397,7 @@ void genX(CmdWaitEvents2)(
       cmd_buffer_accumulate_barrier_bits(cmd_buffer, 1, &pDependencyInfos[i],
                                          &src_stages, &dst_stages, &bits);
 
-      if ((pDependencyInfos->dependencyFlags & VK_DEPENDENCY_ASYMMETRIC_EVENT_BIT_KHR) == 0) {
+      if ((pDependencyInfos[i].dependencyFlags & VK_DEPENDENCY_ASYMMETRIC_EVENT_BIT_KHR) == 0) {
          /* Only consider the invalidate bits, the signal part will do the
           * flushing.
           *
@@ -7486,7 +7488,24 @@ VkResult genX(CmdSetPerformanceStreamMarkerINTEL)(
     VkCommandBuffer                             commandBuffer,
     const VkPerformanceStreamMarkerInfoINTEL*   pMarkerInfo)
 {
-   /* TODO: Waiting on the register to write, might depend on generation. */
+   ANV_FROM_HANDLE(anv_cmd_buffer, cmd_buffer, commandBuffer);
+   bool success = false;
+   uint32_t cmds_size = 0;
+
+   if (intel_perf_metrics_library_get_stream_marker_cmds(
+          cmd_buffer->device->physical->perf, pMarkerInfo->marker,
+          NULL, &cmds_size)) {
+      void* cmds = anv_batch_emit_dwords(&cmd_buffer->batch, cmds_size);
+
+      success = cmds && intel_perf_metrics_library_get_stream_marker_cmds(
+         cmd_buffer->device->physical->perf, pMarkerInfo->marker,
+         cmds, &cmds_size);
+   }
+
+   if (!success) {
+      anv_batch_set_error(&cmd_buffer->batch, VK_ERROR_OUT_OF_HOST_MEMORY);
+      return VK_ERROR_OUT_OF_HOST_MEMORY;
+   }
 
    return VK_SUCCESS;
 }

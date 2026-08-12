@@ -365,7 +365,7 @@ endif
 
 if with_virtio_vk
   dep_venus_protocol = dependency('venus-protocol',
-    version : '== 1.0',
+    version : '== 1.1',
     fallback : ['venus-protocol', 'dep_vn_protocol_driver'],
     required : true
   )
