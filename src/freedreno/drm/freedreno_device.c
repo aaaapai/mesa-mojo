@@ -36,28 +36,24 @@ fd_device_new(int fd)
    drmVersionPtr version = NULL;
    bool use_heap = false;
    bool support_use_heap = true;
+   int kgsl_fd = -1;
 
    os_get_page_size(&os_page_size);
 
-#ifdef HAVE_LIBDRM
-    /* figure out if we are kgsl or msm drm driver: */
-    version = drmGetVersion(fd);
-   if (!version)
-      DEBUG_MSG("cannot get version: %s", strerror(errno));
-#endif
-
-   /* figure out if we are kgsl or msm drm driver: */
+   /* 尝试获取 DRM 版本，失败时不退出，后续会尝试 KGSL */
    version = drmGetVersion(fd);
    if (!version) {
-      ERROR_MSG("cannot get version: %s", strerror(errno));
+      DEBUG_MSG("drmGetVersion failed: %s (assuming KGSL)", strerror(errno));
    }
 
 #ifdef HAVE_FREEDRENO_VIRTIO
    if (debug_get_bool_option("FD_FORCE_VTEST", false)) {
       DEBUG_MSG("virtio_gpu vtest device");
       dev = virtio_device_new(-1, version);
-   } else
+      if (dev) goto out;
+   }
 #endif
+
    if (version && !strcmp(version->name, "msm")) {
       DEBUG_MSG("msm DRM device");
       if (version->version_major != 1) {
@@ -65,35 +61,60 @@ fd_device_new(int fd)
                    version->version_minor, version->version_patchlevel);
          goto out;
       }
-
       dev = msm_device_new(fd, version);
-#ifdef HAVE_FREEDRENO_VIRTIO
-   } else if (version && !strcmp(version->name, "virtio_gpu")) {
-      DEBUG_MSG("virtio_gpu DRM device");
-      dev = virtio_device_new(fd, version);
-      /* Only devices that support a hypervisor are a6xx+, so avoid the
-       * extra guest<->host round trips associated with pipe creation:
-       */
-      use_heap = true;
-#endif
-#if HAVE_FREEDRENO_KGSL
-   } else {
-      /* If drm driver not detected assume this is KGSL */
-      dev = kgsl_device_new(fd);
-      /* Userspace fences are not supported with KGSL */
-      support_use_heap = false;
-      if (dev)
-         goto out;
-#endif
+      if (dev) goto out;
    }
 
+#ifdef HAVE_FREEDRENO_VIRTIO
+   if (version && !strcmp(version->name, "virtio_gpu")) {
+      DEBUG_MSG("virtio_gpu DRM device");
+      dev = virtio_device_new(fd, version);
+      if (dev) {
+         use_heap = true;  /* virtio-gpu 支持 heap */
+         goto out;
+      }
+   }
+#endif
+
+#if HAVE_FREEDRENO_KGSL
+   /* 当 version 为 NULL 或者不是上述 DRM 驱动时，尝试 KGSL */
+   {
+      /* 检查传入的 fd 是否有效（若无效则重新打开 kgsl 设备） */
+      if (fd < 0 || fcntl(fd, F_GETFD) == -1) {
+         kgsl_fd = open("/dev/kgsl-3d0", O_RDWR | O_CLOEXEC);
+         if (kgsl_fd < 0) {
+            ERROR_MSG("Cannot open /dev/kgsl-3d0: %s", strerror(errno));
+            goto out;
+         }
+      } else {
+         kgsl_fd = fd;  /* 使用传入的 fd */
+      }
+
+      dev = kgsl_device_new(kgsl_fd);
+      if (dev) {
+         /* 如果是新打开的 fd，让设备自己关闭 */
+         if (kgsl_fd != fd)
+            dev->closefd = 1;
+         support_use_heap = false;  /* KGSL 不支持子分配堆 */
+         use_heap = false;
+         goto out;
+      } else {
+         ERROR_MSG("kgsl_device_new failed");
+         if (kgsl_fd != fd)
+            close(kgsl_fd);
+      }
+   }
+#endif
+
+   /* 所有尝试均失败 */
    if (!dev) {
-      INFO_MSG("unsupported device: %s", version->name);
+      INFO_MSG("unsupported device: %s", version ? version->name : "unknown");
       goto out;
    }
 
 out:
-   drmFreeVersion(version);
+   if (version)
+      drmFreeVersion(version);
 
    if (!dev)
       return NULL;
@@ -105,6 +126,11 @@ out:
 
    p_atomic_set(&dev->refcnt, 1);
    dev->fd = fd;
+
+   if (kgsl_fd != -1 && kgsl_fd != fd && dev->fd == fd) {
+      dev->fd = kgsl_fd;
+   }
+
    dev->handle_table =
       _mesa_hash_table_create(NULL, _mesa_hash_u32, _mesa_key_u32_equal);
    dev->name_table =
@@ -118,7 +144,6 @@ out:
 
    if (!use_heap) {
       struct fd_pipe *pipe = fd_pipe_new(dev, FD_PIPE_3D);
-
       if (!pipe)
          goto fail;
 
@@ -127,7 +152,6 @@ out:
        * for now:
        */
       use_heap = fd_dev_gen(&pipe->dev_id) >= 6;
-
       fd_pipe_del(pipe);
    }
 
