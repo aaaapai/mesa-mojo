@@ -1198,21 +1198,13 @@ droid_load_driver(_EGLDisplay *disp, bool swrast)
    if (disp->Options.Zink) {
       dri2_dpy->driver_name = strdup("zink");
    } else {
-      /* 检查 fd 是否为 kgsl */
-      if (dri2_dpy->fd_render_gpu >= 0 && droid_is_kgsl_fd(dri2_dpy->fd_render_gpu)) {
-         dri2_dpy->driver_name = strdup("freedreno");
-      } else {
-         dri2_dpy->driver_name = loader_get_driver_for_fd(dri2_dpy->fd_render_gpu);
-      }
+      dri2_dpy->driver_name = loader_get_driver_for_fd(dri2_dpy->fd_render_gpu);
    }
    if (dri2_dpy->driver_name == NULL)
       return false;
 
    if (swrast && !disp->Options.Zink) {
-      /* 如果是 freedreno，保留，不转换为软件驱动 */
-      if (strcmp(dri2_dpy->driver_name, "freedreno") == 0) {
-         /* keep */
-      } else if (strcmp(dri2_dpy->driver_name, "vgem") == 0 ||
+      if (strcmp(dri2_dpy->driver_name, "vgem") == 0 ||
                  strcmp(dri2_dpy->driver_name, "virtio_gpu") == 0) {
          free(dri2_dpy->driver_name);
          dri2_dpy->driver_name = strdup("kms_swrast");
@@ -1288,8 +1280,11 @@ droid_open_device_kgsl(_EGLDisplay *disp, bool swrast)
 
    dri2_dpy->fd_render_gpu = loader_open_device(path);
    if (dri2_dpy->fd_render_gpu < 0) {
-      _eglLog(_EGL_WARNING, "Failed to open kgsl");
-      return EGL_FALSE;
+      dri2_dpy->fd_render_gpu = open("/dev/kgsl-3d0", O_RDWR);
+      if (dri2_dpy->fd_render_gpu < 0) {
+          _eglLog(_EGL_WARNING, "Failed to open kgsl");
+          return EGL_FALSE;
+      }
    }
 
    dri2_dpy->driver_name = strdup(driver_name);
